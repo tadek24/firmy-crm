@@ -14,9 +14,9 @@ export async function POST(request: Request) {
   try {
     await requireUser(); checkLocalMutation(request);
     const data = await request.json();
-    if (!data || !['start','pause','resume'].includes(data.action)) throw new RegistryError('Nieprawidłowe polecenie importu.', 400);
+    if (!data || !['start','pause','resume','focus'].includes(data.action)) throw new RegistryError('Nieprawidłowe polecenie importu.', 400);
     if (data.action !== 'pause' && !process.env.CEIDG_API_TOKEN?.trim()) throw new RegistryError('Dodaj CEIDG_API_TOKEN w ustawieniach Vercel i wykonaj ponowne wdrożenie.', 503);
-    const job = await controlBulk(data.action);
+    const job = await controlBulk(data.action, data.target === undefined ? 1000 : data.target);
     if (job.state === 'running') {
       try { const run = await start(importInCloud, [job.id, job.generation]); await attachWorkflow(job.id, job.generation, run.runId); }
       catch { await dispatchFailed(job.id, job.generation); throw new RegistryError('Nie udało się uruchomić importu w chmurze. Spróbuj użyć Wznów.', 503); }
