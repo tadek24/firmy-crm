@@ -30,15 +30,15 @@ async function getJson(url: URL, token?: string): Promise<unknown> {
   catch { throw new RegistryError('Rejestr nie odpowiada. Sprawdź połączenie i spróbuj ponownie.'); }
   if (response.status === 204) return null;
   if (!response.ok) {
-    const messages: Record<number, string> = { 400: 'Rejestr odrzucił parametry zapytania.', 401: 'CEIDG odrzucił token. Sprawdź CEIDG_API_TOKEN w .env.', 403: 'Brak uprawnień do rejestru.', 404: 'Nie znaleziono podmiotu w rejestrze.', 429: 'Limit żądań rejestru. Spróbuj później.' };
+    const messages: Record<number, string> = { 400: 'Rejestr odrzucił parametry zapytania.', 401: 'CEIDG odrzucił token. Sprawdź CEIDG_API_TOKEN w ustawieniach Vercel.', 403: 'Brak uprawnień do rejestru.', 404: 'Nie znaleziono podmiotu w rejestrze.', 429: 'Limit żądań rejestru. Spróbuj później.' };
     throw new RegistryError(messages[response.status] || 'Usługa rejestru jest chwilowo niedostępna.', response.status === 429 ? 429 : response.status === 404 ? 404 : 502, response.headers.get('retry-after') || undefined, response.status);
   }
   try { return await response.json(); } catch { throw new RegistryError('Rejestr zwrócił nieprawidłowy format danych.'); }
 }
 async function ceidgRequest(url: URL) {
   const token = process.env.CEIDG_API_TOKEN?.trim();
-  if (!token) throw new RegistryError('Uzupełnij CEIDG_API_TOKEN w pliku .env i uruchom ponownie serwer.', 503);
-  try { reserveCeidgRequest(); } catch (error) { throw new RegistryError((error as Error).message, 429, error instanceof CeidgRateLimitError ? String(error.retryAfter) : '4'); }
+  if (!token) throw new RegistryError('Dodaj CEIDG_API_TOKEN w ustawieniach Vercel i wykonaj ponowne wdrożenie.', 503);
+  try { await reserveCeidgRequest(); } catch (error) { throw new RegistryError((error as Error).message, 429, error instanceof CeidgRateLimitError ? String(error.retryAfter) : '4'); }
   return getJson(url, token);
 }
 export async function ceidgActivePage(page: number) {

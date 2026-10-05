@@ -1,0 +1,8 @@
+{
+  "installCommand": "npm install",
+  "functions": {
+    "app/**/route.ts": {
+      "maxDuration": 300
+    }
+  }
+}
