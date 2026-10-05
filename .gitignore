@@ -11,3 +11,6 @@ data/
 .DS_Store
 src/generated/prisma/
 *.tsbuildinfo
+
+app/.well-known/workflow/
+.workflow-data/
