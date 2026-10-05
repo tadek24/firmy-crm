@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum RegistrySource {
+  CEIDG
+  KRS
+  MANUAL
+}
+
+enum CompanyState {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+  UNKNOWN
+}
+
+enum LeadStatus {
+  NEW
+  TO_REVIEW
+  TO_CONTACT
+  CONTACTED
+  INTERESTED
+  OFFER_SENT
+  NEGOTIATION
+  CUSTOMER
+  NOT_INTERESTED
+  DO_NOT_CONTACT
+}
+
+enum ContactType {
+  PHONE
+  EMAIL
+  MEETING
+  OTHER
+}
+
+enum ContactResult {
+  NO_ANSWER
+  CALLBACK
+  NOT_INTERESTED
+  INTERESTED
+  SEND_EMAIL
+  OFFER_SENT
+  CUSTOMER
+  OTHER
+}
+
+model Company {
+  id             String          @id @default(cuid())
+  source         RegistrySource
+  sourceId       String?
+  name           String
+  nip            String?         @unique
+  regon          String?         @unique
+  krs            String?         @unique
+  legalForm      String?
+  state          CompanyState    @default(UNKNOWN)
+  leadStatus     LeadStatus      @default(NEW)
+  pkdMain        String?
+  category       String?
+  website        String?
+  email          String?
+  phone          String?
+  city           String?
+  postalCode     String?
+  street         String?
+  voivodeship    String?
+  county         String?
+  commune        String?
+  startedAt      DateTime?
+  registryData   Json?
+  lastRegistrySyncAt DateTime?
+
+  pkdCodes       CompanyPkd[]
+  tags           CompanyTag[]
+  contacts       ContactAttempt[]
+  notes          Note[]
+  tasks          Task[]
+  onlinePresence OnlinePresence[]
+  consents       MarketingConsent[]
+
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([name])
+  @@index([pkdMain])
+  @@index([category])
+  @@index([leadStatus])
+  @@index([voivodeship])
+  @@index([city])
+}
+
+model PkdCode {
+  code        String       @id
+  name        String
+  section     String?
+  category    String?
+  companies   CompanyPkd[]
+}
+
+model CompanyPkd {
+  companyId String
+  pkdCode   String
+  isMain    Boolean @default(false)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  pkd     PkdCode @relation(fields: [pkdCode], references: [code], onDelete: Cascade)
+
+  @@id([companyId, pkdCode])
+  @@index([pkdCode, isMain])
+}
+
+model Tag {
+  id        String       @id @default(cuid())
+  name      String       @unique
+  color     String?
+  companies CompanyTag[]
+  createdAt DateTime     @default(now())
+}
+
+model CompanyTag {
+  companyId String
+  tagId     String
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([companyId, tagId])
+}
+
+model ContactAttempt {
+  id         String        @id @default(cuid())
+  companyId  String
+  type       ContactType
+  result     ContactResult
+  note       String?
+  contactedAt DateTime     @default(now())
+  nextActionAt DateTime?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, contactedAt])
+  @@index([nextActionAt])
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  companyId String
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+}
+
+model Task {
+  id          String   @id @default(cuid())
+  companyId   String
+  title       String
+  dueAt       DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([dueAt, completedAt])
+}
+
+model OnlinePresence {
+  id         String   @id @default(cuid())
+  companyId  String
+  kind       String
+  url        String
+  platform   String?
+  confidence Int?
+  detectedAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, kind, url])
+}
+
+model MarketingConsent {
+  id        String   @id @default(cuid())
+  companyId String
+  channel   String
+  status    String
+  source    String?
+  notedAt   DateTime @default(now())
+  note      String?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, channel, status])
+}
+
+model ImportJob {
+  id          String         @id @default(cuid())
+  source      RegistrySource
+  status      String
+  cursor      String?
+  processed   Int            @default(0)
+  inserted    Int            @default(0)
+  updated     Int            @default(0)
+  failed      Int            @default(0)
+  startedAt   DateTime       @default(now())
+  finishedAt  DateTime?
+  error       String?
+}

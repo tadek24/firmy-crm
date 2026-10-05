@@ -1,0 +1,27 @@
+{
+  "project": "firmy-crm",
+  "files": [
+    ".env.example",
+    ".gitignore",
+    "README.md",
+    "app/globals.css",
+    "app/layout.tsx",
+    "app/page.tsx",
+    "components/crm-app.tsx",
+    "docker-compose.yml",
+    "eslint.config.mjs",
+    "lib/mock-data.ts",
+    "lib/pkd.ts",
+    "lib/types.ts",
+    "next-env.d.ts",
+    "next.config.ts",
+    "package.json",
+    "postcss.config.mjs",
+    "prisma.config.ts",
+    "prisma/schema.prisma",
+    "scripts/import-ceidg.ts",
+    "scripts/import-krs.ts",
+    "tsconfig.json"
+  ],
+  "notes": "Demo UI works without DB; Prisma/PostgreSQL scaffold included."
+}

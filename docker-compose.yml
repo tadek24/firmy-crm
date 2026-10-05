@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: firmy-crm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: firmy
+      POSTGRES_PASSWORD: firmy
+      POSTGRES_DB: firmy_crm
+    ports:
+      - "5432:5432"
+    volumes:
+      - firmy_crm_postgres:/var/lib/postgresql/data
+
+volumes:
+  firmy_crm_postgres:
