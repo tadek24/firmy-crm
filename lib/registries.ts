@@ -30,6 +30,13 @@ async function getJson(url: URL, token?: string): Promise<unknown> {
   catch { throw new RegistryError('Rejestr nie odpowiada. Sprawdź połączenie i spróbuj ponownie.'); }
   if (response.status === 204) return null;
   if (!response.ok) {
+    if (response.status === 400) {
+      const details = obj(await response.json().catch(() => null));
+      let message = str(details.message);
+      if (token) message = message.replaceAll(token, '[ukryto]');
+      message = message.replace(/Bearer\s+\S+|[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+/g, '[ukryto]').replace(/[\r\n\t]/g, ' ').slice(0, 300);
+      throw new RegistryError(`Rejestr odrzucił parametry zapytania${message ? `: ${message}` : '.'}`, 502, undefined, 400);
+    }
     const messages: Record<number, string> = { 400: 'Rejestr odrzucił parametry zapytania.', 401: 'CEIDG odrzucił token. Sprawdź CEIDG_API_TOKEN w ustawieniach Vercel.', 403: 'Brak uprawnień do rejestru.', 404: 'Nie znaleziono podmiotu w rejestrze.', 429: 'Limit żądań rejestru. Spróbuj później.' };
     throw new RegistryError(messages[response.status] || 'Usługa rejestru jest chwilowo niedostępna.', response.status === 429 ? 429 : response.status === 404 ? 404 : 502, response.headers.get('retry-after') || undefined, response.status);
   }
