@@ -7,3 +7,4 @@
 .login form { display: grid; gap: 18px; margin-top: 28px; }
 .login label { display: grid; gap: 8px; }
 .login input { width: 100%; }
+.analysis-summary{min-width:180px;max-width:230px;font-size:12px;display:grid;gap:5px}.analysis-summary strong{font-size:12px;color:#963613}.analysis-summary small{color:var(--muted)}.analysis-detail{margin-top:24px;padding-top:22px;border-top:2px solid #243746}.analysis-detail h3{margin:6px 0 12px}.analysis-detail h4{margin:20px 0 8px}.analysis-detail ul{padding-left:18px;font-size:13px;line-height:1.6}.opportunity{border-top:1px solid #d6dfe3;padding:12px 0}.opportunity>div{display:flex;justify-content:space-between;gap:12px}.opportunity small{color:#687b87}.opportunity p{font-size:13px;line-height:1.55;margin:7px 0 0}.table-wrap table{min-width:1050px}
