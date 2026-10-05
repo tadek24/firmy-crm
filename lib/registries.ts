@@ -50,7 +50,7 @@ async function ceidgRequest(url: URL) {
 }
 export async function ceidgActivePage(page: number) {
   const url = new URL('https://dane.biznes.gov.pl/api/ceidg/v3/firmy');
-  url.searchParams.set('status', 'AKTYWNY'); url.searchParams.set('limit', '50'); url.searchParams.set('page', String(page));
+  url.searchParams.set('status', 'AKTYWNY'); url.searchParams.set('limit', '25'); url.searchParams.set('page', String(page));
   const response = await ceidgRequest(url);
   if (!response) return { ids: [], total: 0, nextPage: null };
   const data = obj(response);
@@ -66,9 +66,9 @@ export async function ceidgActivePage(page: number) {
     if (Number.isSafeInteger(number) && number > page) nextPage = number;
   }
   // Some responses repeat the current page in links.next, even on the last page.
-  if (nextPage === null && ids.length === 50) {
+  if (nextPage === null && ids.length === 25) {
     const total = typeof data.count === 'number' ? data.count : 0;
-    if (total > (page + 1) * 50) nextPage = page + 1;
+    if (total > (page + 1) * 25) nextPage = page + 1;
     else if (!('next' in links) && total === 0) throw new RegistryError('CEIDG nie podał informacji o kolejnej stronie.');
   }
   return { ids, total: typeof data.count === 'number' ? data.count : null, nextPage };
