@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { batch, query, transaction, type Statement } from './database';
 import type { Company } from './types';
 import { analyzeCompany, ANALYSIS_VERSION } from './analysis';
+import { parseContactFilter } from './contact-filters';
+import { qualifiesForProspecting } from './prospecting';
+const contactPresent = (field: 'email' | 'phone' | 'website') => `(trim(coalesce(json_extract(registry,'$.${field}'),''))!='')`;
 export const statuses = ['Nowy', 'Do sprawdzenia', 'Do kontaktu', 'Kontakt wykonany', 'Zainteresowany', 'Oferta wysłana', 'Negocjacje', 'Klient', 'Nie zainteresowany', 'Nie kontaktować'] as const;
 export type RegistryCompany = Omit<Company, 'status' | 'tags' | 'note' | 'online' | 'lastContact'>;
 let ready: Promise<void> | undefined;
@@ -20,10 +23,12 @@ async function initialize() {
     'CREATE INDEX IF NOT EXISTS api_request_time ON api_requests(createdAt)',
     "CREATE INDEX IF NOT EXISTS company_status ON companies(json_extract(crm,'$.status'))",
     "CREATE INDEX IF NOT EXISTS company_category ON companies(json_extract(registry,'$.category'))",
+    ...(['email', 'phone', 'website'] as const).map(field => `CREATE INDEX IF NOT EXISTS company_contact_${field} ON companies(${contactPresent(field)})`),
     'CREATE TABLE IF NOT EXISTS metrics (id INTEGER PRIMARY KEY, total INTEGER NOT NULL, toContact INTEGER NOT NULL, active INTEGER NOT NULL, website INTEGER NOT NULL, email INTEGER NOT NULL, phone INTEGER NOT NULL)',
     'CREATE TABLE IF NOT EXISTS bulk_jobs (id TEXT PRIMARY KEY, state TEXT NOT NULL, data TEXT NOT NULL)',
     'CREATE TABLE IF NOT EXISTS worker_lease (id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, expiresAt INTEGER NOT NULL)',
     'CREATE TABLE IF NOT EXISTS bulk_seen (jobId TEXT NOT NULL, registryId TEXT NOT NULL, PRIMARY KEY(jobId,registryId))',
+    'CREATE TABLE IF NOT EXISTS prospect_members (jobId TEXT NOT NULL, companyId TEXT NOT NULL, PRIMARY KEY(jobId,companyId))',
     'CREATE TABLE IF NOT EXISTS auth_attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expiresAt INTEGER NOT NULL)',
   ];
   const flags = (prefix: string) => ({ toContact: `(json_extract(${prefix}.crm,'$.status')='Do kontaktu')`, active: `(json_extract(${prefix}.crm,'$.status') IN ('Zainteresowany','Oferta wysłana','Negocjacje'))`, website: `(coalesce(json_extract(${prefix}.registry,'$.website'),'')!='')`, email: `(coalesce(json_extract(${prefix}.registry,'$.email'),'')!='')`, phone: `(coalesce(json_extract(${prefix}.registry,'$.phone'),'')!='')` });
@@ -41,7 +46,7 @@ function unpack(row: Row): Company {
   return company;
 }
 export async function listCompanies() { await setup(); return ((await query('SELECT * FROM companies ORDER BY rowid DESC')).rows as Row[]).map(unpack); }
-export async function companyPage(search = '', status = 'Wszystkie', category = 'Wszystkie', page = 0) {
+export async function companyPage(search = '', status = 'Wszystkie', category = 'Wszystkie', page = 0, contact = 'all', scope = 'all') {
   await setup(); const clauses: string[] = [], parameters: string[] = [];
   if (search.trim()) {
     clauses.push("(coalesce(json_extract(registry,'$.search'),lower(registry)) || coalesce(json_extract(crm,'$.searchTags'),lower(json_extract(crm,'$.tags')))) LIKE ? ESCAPE '\\'");
@@ -49,12 +54,43 @@ export async function companyPage(search = '', status = 'Wszystkie', category = 
   }
   if (status !== 'Wszystkie') { clauses.push("json_extract(crm,'$.status')=?"); parameters.push(status); }
   if (category !== 'Wszystkie') { clauses.push("json_extract(registry,'$.category')=?"); parameters.push(category); }
+  const contactFilter = parseContactFilter(contact);
+  if (['email', 'phone', 'website'].includes(contactFilter)) clauses.push(`${contactPresent(contactFilter as 'email' | 'phone' | 'website')}=1`);
+  if (contactFilter === 'direct') clauses.push(`(${contactPresent('email')}=1 OR ${contactPresent('phone')}=1)`);
+  if (contactFilter === 'any') clauses.push(`(${contactPresent('email')}=1 OR ${contactPresent('phone')}=1 OR ${contactPresent('website')}=1)`);
+  if (contactFilter === 'none') clauses.push(`(${contactPresent('email')}=0 AND ${contactPresent('phone')}=0 AND ${contactPresent('website')}=0)`);
+  if (scope === 'prospects') {
+    clauses.push("EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id AND jobId=(SELECT id FROM bulk_jobs ORDER BY rowid DESC LIMIT 1))");
+    clauses.push("json_extract(crm,'$.status') NOT IN ('Nie kontaktować','Nie zainteresowany','Klient')");
+  }
   const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
   const summary = await batch([{ sql: 'SELECT * FROM metrics WHERE id=1' }, { sql: "SELECT DISTINCT json_extract(registry,'$.category') AS category FROM companies ORDER BY category" }, ...(where ? [{ sql: `SELECT count(*) AS n FROM companies${where}`, args: parameters }] : [])]);
   const stats = summary[0].rows[0]; const total = Number(where ? summary[2].rows[0].n : stats.total);
   const currentPage = Math.min(Math.max(0, page), Math.max(0, Math.ceil(total / 100) - 1));
-  const companies = ((await query(`SELECT * FROM companies${where} ORDER BY rowid DESC LIMIT 100 OFFSET ?`, [...parameters, currentPage * 100])).rows as Row[]).map(unpack);
+  const order = scope === 'prospects' ? "coalesce(json_extract(registry,'$.analysis.fitScore'),0) DESC,rowid DESC" : 'rowid DESC';
+  const companies = ((await query(`SELECT * FROM companies${where} ORDER BY ${order} LIMIT 100 OFFSET ?`, [...parameters, currentPage * 100])).rows as Row[]).map(unpack);
   return { companies, total, page: currentPage, pageSize: 100, stats, categories: summary[1].rows.map(row => row.category) };
+}
+export async function addProspects(jobId: string, companies: Company[], remaining: number) {
+  const eligible = companies.filter(qualifiesForProspecting);
+  if (!eligible.length || remaining <= 0) return 0;
+  const current = (await query(`SELECT companyId FROM prospect_members WHERE jobId=? AND companyId IN (${eligible.map(() => '?').join(',')})`, [jobId, ...eligible.map(company => company.id)])).rows.map(row => row.companyId);
+  const next = eligible.filter(company => !current.includes(company.id)).slice(0, remaining);
+  const writes = next.flatMap(company => [
+    { sql: "UPDATE companies SET registry=json_set(registry,'$.analysis',json(?)) WHERE id=?", args: [JSON.stringify(analyzeCompany(company)), company.id] },
+    { sql: 'INSERT OR IGNORE INTO prospect_members VALUES (?,?)', args: [jobId, company.id] },
+  ]);
+  let added = 0;
+  for (let offset = 0; offset < writes.length; offset += 100) {
+    const results = await batch(writes.slice(offset, offset + 100));
+    added += results.reduce((sum, result, index) => sum + (index % 2 ? result.changes : 0), 0);
+  }
+  return added;
+}
+export async function seedProspects(jobId: string, target: number, maxChecks: number) {
+  const rows = (await query(`SELECT * FROM companies WHERE source='CEIDG' AND json_extract(registry,'$.registryStatus')='AKTYWNY' AND (${contactPresent('email')}=1 OR ${contactPresent('phone')}=1) ORDER BY rowid DESC LIMIT ?`, [maxChecks])).rows as Row[];
+  const candidates = rows.map(unpack).filter(qualifiesForProspecting).sort((a,b) => (b.analysis?.fitScore || 0) - (a.analysis?.fitScore || 0));
+  return addProspects(jobId, candidates.slice(0, target), target);
 }
 export async function recentImports() { await setup(); return (await query('SELECT * FROM imports ORDER BY id DESC LIMIT 8')).rows; }
 export class CeidgRateLimitError extends Error {

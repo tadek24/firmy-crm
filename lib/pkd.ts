@@ -20,3 +20,10 @@ export function categorizePkd(code: string): string {
 
   return "Inne";
 }
+export function businessSector(pkd: string): 'Usługi' | 'Handel' | 'Pozostałe' {
+  const n = Number.parseInt(pkd.slice(0, 2), 10);
+  if (n >= 45 && n <= 47) return 'Handel';
+  if ((n >= 41 && n <= 43) || (n >= 49 && n <= 53) || (n >= 55 && n <= 56) || (n >= 58 && n <= 66) || (n >= 68 && n <= 75) || (n >= 77 && n <= 82) || (n >= 85 && n <= 88) || (n >= 90 && n <= 96)) return 'Usługi';
+  return 'Pozostałe';
+}
+
