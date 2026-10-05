@@ -6,16 +6,23 @@ const fixture: Company = { id: 'fixture', registryId: 'fixture', name: 'Fixture'
 test('Service suggestions distinguish undeclared WWW from actual absence; no unsupported marketplace lead', () => {
   const analysis = analyzeCompany(fixture);
   assert.deepEqual(analysis.opportunities.map(item => item.channel), ['Strona WWW']);
+  assert.equal(analysis.sector, 'Usługi');
+  assert.equal(analysis.fitScore, analysis.fitReasons.reduce((sum, reason) => sum + reason.points, 0));
+  assert.match(analysis.opportunities[0].offer, /Strona usługowa/);
+  assert.ok(analysis.opportunities[0].questions.some(question => /już stronę/.test(question)));
   assert.ok(analysis.issues.some(issue => /może mieć stronę/.test(issue)));
   assert.equal(analyzeCompany({ ...fixture, website: 'https://example.org' }).opportunities.length, 0);
   assert.equal(analyzeCompany({ ...fixture, pkdMain: '', pkdName: '' }).priority, 'Brak podstaw');
   assert.equal(analyzeCompany({ ...fixture, registryStatus: 'ZAWIESZONY' }).opportunities.length, 0);
+  assert.equal(analyzeCompany({ ...fixture, registryStatus: 'ZAWIESZONY' }).fitScore, 0);
 });
 test('Retail signals are conditional, and PKD 2025 intermediaries and restricted goods are excluded', () => {
   const retail = { ...fixture, pkdMain: '47.71.Z', pkdName: 'Sprzedaż detaliczna odzieży', email: 'fixture@example.org' };
   const analysis = analyzeCompany(retail);
   assert.deepEqual(analysis.opportunities.map(item => item.channel), ['Strona WWW', 'Allegro', 'Amazon / eBay']);
   assert.equal(analysis.priority, 'Sprawdź wcześniej');
+  assert.equal(analysis.fitScore, 100);
+  assert.ok(analysis.opportunities.every(item => item.offer && item.benefit && item.questions.length));
   assert.match(analysis.opportunities[2].reason, /nie potwierdza eksportu/);
   assert.equal(analyzeCompany({ ...retail, pkdName: 'Sprzedaż detaliczna paliw' }).opportunities.length, 1);
   assert.equal(analyzeCompany({ ...retail, pkdMain: '47.91.Z', pkdYear: '2025', pkdName: 'Pośrednictwo w sprzedaży detalicznej niewyspecjalizowanej' }).opportunities.length, 1);
