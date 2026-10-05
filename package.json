@@ -3,12 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
-    "start": "next start",
+    "start": "next start --hostname 127.0.0.1",
     "lint": "eslint .",
     "db:generate": "prisma generate",
-    "db:validate": "prisma validate"
+    "db:validate": "prisma validate",
+    "test:integrations": "tsx --test tests/*.test.ts",
+    "import:ceidg": "tsx --env-file=.env scripts/import-ceidg.ts",
+    "import:krs": "tsx --env-file=.env scripts/import-krs.ts",
+    "import:worker": "tsx --env-file=.env scripts/bulk-worker.ts"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -25,5 +29,8 @@
     "prisma": "7.10.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=24.14.0"
   }
 }

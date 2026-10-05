@@ -10,7 +10,6 @@
     "components/crm-app.tsx",
     "docker-compose.yml",
     "eslint.config.mjs",
-    "lib/mock-data.ts",
     "lib/pkd.ts",
     "lib/types.ts",
     "next-env.d.ts",
@@ -21,7 +20,21 @@
     "prisma/schema.prisma",
     "scripts/import-ceidg.ts",
     "scripts/import-krs.ts",
-    "tsconfig.json"
+    "tsconfig.json",
+    "lib/store.ts",
+    "lib/registries.ts",
+    "lib/http.ts",
+    "app/api/companies/route.ts",
+    "app/api/companies/[id]/route.ts",
+    "app/api/import/route.ts",
+    "tests/integrations.test.ts",
+    "package-lock.json",
+    "lib/bulk.ts",
+    "lib/worker-launcher.ts",
+    "components/bulk-import.tsx",
+    "scripts/bulk-worker.ts",
+    "app/api/import/bulk/route.ts",
+    "tests/bulk.test.ts"
   ],
-  "notes": "Demo UI works without DB; Prisma/PostgreSQL scaffold included."
+  "notes": "Local CRM with paginated SQLite storage, resumable background import of all active CEIDG firms and available registry contacts. KRS supports individual current extracts; bulk CEIDG is not a complete KRS dataset. Requires user JWT in .env."
 }

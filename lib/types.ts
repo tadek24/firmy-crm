@@ -12,6 +12,10 @@ export type LeadStatus =
 
 export type Company = {
   id: string;
+  registryId: string;
+  registryStatus?: string;
+  syncedAt?: string;
+  pkdYear?: string;
   name: string;
   source: "CEIDG" | "KRS";
   nip: string;

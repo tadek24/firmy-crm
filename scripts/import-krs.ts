@@ -1,12 +1,7 @@
-/**
- * Placeholder for the KRS importer.
- *
- * Planned flow:
- * 1. Fetch changed/new registry records in batches.
- * 2. Normalize identifiers and legal form.
- * 3. Match existing companies primarily by NIP/REGON/KRS.
- * 4. Upsert registry data while preserving tags, notes and sales history.
- * 5. Record the synchronization cursor/progress in ImportJob.
- */
-
-console.log("KRS importer: not connected yet.");
+import { krsByNumber } from '../lib/registries';
+import { upsertRegistry } from '../lib/store';
+async function main() {
+  const krs = process.argv[2]; if (!krs) throw new Error('Podaj KRS: npm run import:krs -- NUMER_KRS');
+  const companies = await krsByNumber(krs); upsertRegistry(companies, 'KRS'); console.log(`Zapisano ${companies.length} firm.`);
+}
+main().catch(error => { console.error(error.message); process.exitCode = 1; });
