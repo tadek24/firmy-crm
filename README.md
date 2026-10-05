@@ -11,9 +11,9 @@ CRM z rzeczywistymi danymi CEIDG i KRS, trwałą bazą Turso i importem w tle ob
 
 Sekrety przechowuj wyłącznie w Vercel lub lokalnym `.env`. Nie wpisuj ich do `.env.example`, kodu, opisu PR ani GitHub. Baza tworzy tabele przy pierwszym połączeniu. Publiczne API CRM wymaga podpisanej sesji, hasło i tokeny pozostają na serwerze. Sesja trwa 12 godzin, cookie jest HttpOnly i SameSite=Strict, na Vercel także Secure. Próby logowania mają współdzielony limit 15 na 5 minut. Zmiana hasła lub sekretu sesji jest operacją administracyjną w panelu Vercel; zmiana samego hasła nie unieważnia wcześniejszych sesji — w tym celu zmień też CRM_SESSION_SECRET.
 
-## Import automatyczny
+## Mechanizm importu i pozycja zapisu (szerszy zakres archiwalny)
 
-Import obejmuje wszystkie aktywne wpisy CEIDG, bez ograniczenia daty rozpoczęcia działalności. Lista `/firmy?status=AKTYWNY&limit=25&page=…` jest uzupełniana szczegółami `/firma?ids=…` w partiach do 25. Zapis firmy i pozycji kolejki odbywa się w jednej transakcji. Wznowienie zachowuje postęp. Pauza unieważnia poprzednią generację zadania: odpowiedź rozpoczętego wcześniej zapytania nie przesuwa już kursora. Notatki, etykiety i status handlowy są zachowywane przy odświeżaniu danych.
+Lista źródłowa obejmuje aktywne wpisy CEIDG bez ograniczenia daty rozpoczęcia działalności. Bieżąca selekcja zapisuje tylko dopasowane firmy i zatrzymuje się przy celu albo budżecie sprawdzeń (opis poniżej). Lista `/firmy?status=AKTYWNY&limit=25&page=…` jest uzupełniana szczegółami `/firma?ids=…` w partiach do 25. Zapis firmy i pozycji kolejki odbywa się w jednej transakcji. Wznowienie zachowuje postęp. Pauza unieważnia poprzednią generację zadania: odpowiedź rozpoczętego wcześniej zapytania nie przesuwa już kursora. Notatki, etykiety i status handlowy są zachowywane przy odświeżaniu danych.
 
 Workflow wykonuje krótkie serie pobrań, a następnie usypia w chmurze. Co 100 serii uruchamia kolejny przebieg od trwałego punktu zapisu, aby nie przekraczać limitów liczby zdarzeń jednego Workflow. Blokada w bazie zapobiega jednoczesnemu przetwarzaniu przez dwa procesy. Limit aplikacji to maksymalnie 1000 zapytań na godzinę z odstępem minimum 3,6 sekundy; pętla czeka minimum 4 sekundy. Inne aplikacje z tym samym tokenem współdzielą limit CEIDG. HTTP 429 respektuje Retry-After, błędy przejściowe mają do 10 ponowień, odrzucony token i konflikt danych zatrzymują import. Awaria Workflow pozostawia punkt zapisu; można wstrzymać i wznowić import w interfejsie, po sprawdzeniu błędu w panelu Workflows na Vercel.
 
@@ -41,3 +41,13 @@ Lista CEIDG używa limit=25, zgodnie z odpowiedzią walidacji produkcyjnego API 
 Gdy API odrzuci partię szczegółów z powodu maksymalnej liczby identyfikatorów, importer zmniejsza partię o połowę i ponawia ją od tego samego punktu. Wielkość zapisuje w zadaniu; nie pomija firm. Inne błędy walidacji zatrzymują import.
 
 Sprzedaż zagraniczna eBay: https://www.ebay.com/help/selling/getting-started-selling/selling-internationally?id=4132. Konkretne wymagania i dostępność zależą od rynku i produktów.
+
+## Filtrowanie kontaktów
+W bazie firm filtr Dane kontaktowe pozwala wybrać firmy z e-mailem, telefonem, WWW, dowolnym z tych pól, e-mailem lub telefonem oraz bez wszystkich trzech danych. Filtr łączy się z wyszukiwaniem, statusem i PKD. Wyniki i ich liczba są filtrowane w bazie przed podziałem na strony, a nie tylko na aktualnych 100 wpisach. Obecność kontaktu nie potwierdza jego aktualności. Nowe wpisy są uwzględniane przy odświeżaniu. Filtr wykonuje tylko odczyt firm; nie zmienia kolejki, blokad ani punktu zapisu importu. Wdrożenie dodaje indeksy kontaktów bez usuwania danych.
+
+## Kolejka dopasowanych firm
+Selekcja zastępuje szeroki import: aktywne CEIDG, główna działalność usługowa lub handlowa, telefon lub e-mail i przynajmniej jeden sygnał WWW/marketplace. Domyślny cel wynosi 1000 firm, maksymalnie 10 000 kolejnych wpisów do sprawdzenia. Zadanie zatrzymuje się po osiągnięciu celu, limitu sprawdzeń lub końca listy; limit sprawdzeń nie oznacza, że zebrano cały cel. Początkowa kolejka wykorzystuje istniejącą bazę i zachowuje bieżący kursor importu. Stare dane nie są usuwane. Zmiana zakresu zwiększa generację zadania, dzięki czemu odpowiedź poprzedniego procesu nie przesuwa nowego punktu zapisu.
+
+Nowe wpisy bez dopasowania nie są zapisywane. Kolejka deduplikuje firmy po identyfikatorze CRM; ręczne notatki i status pozostają zachowane. Statusy Klient, Nie zainteresowany i Nie kontaktować wykluczają firmę z kolejki. Widok Kolejka dopasowanych firm pokazuje tylko członków aktualnej selekcji, posortowanych według dopasowania. Wszystkie zapisane firmy pozostają dostępne w drugim widoku.
+
+Analiza v2 pokazuje sektor, dopasowanie punktowe, składniki oceny, propozycję usługi, możliwą korzyść i pytania do rozpoznania. Punkty opisują dopasowanie do oferty, nie prawdopodobieństwo zakupu; reguły opierają się wyłącznie na rejestrze. Nie wykonują audytu WWW, nie weryfikują kont marketplace ani nie dopowiadają zainteresowania.

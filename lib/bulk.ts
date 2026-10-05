@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { batch, query, transaction, type Statement } from './database';
-import { setup, upsertRegistry } from './store';
+import { setup, upsertRegistry, seedProspects, addProspects } from './store';
+import { qualifiesForProspecting } from './prospecting';
 import { ceidgActivePage, ceidgDetails, RegistryError } from './registries';
 export type BulkJob = {
   id: string; state: 'running' | 'paused' | 'complete' | 'failed';
   generation: number; workflowId?: string;
   page: number; pending: string[]; nextPage: number | null; total: number | null;
   detailBatchSize?: number;
+  selection?: { target: number; maxChecks: number; checked: number; qualified: number; excluded: number; stopReason?: 'target' | 'budget' | 'exhausted' };
   discovered: number; processed: number; saved: number; skipped: number;
   withWebsite: number; withEmail: number; withPhone: number;
   retries: number; nextRunAt: number; message: string; createdAt: string; updatedAt: string;
@@ -19,13 +21,31 @@ function saveStatement(job: BulkJob): Statement {
   job.updatedAt = new Date().toISOString();
   return { sql: 'UPDATE bulk_jobs SET state=?,data=? WHERE id=?', args: [job.state, JSON.stringify(job), job.id] };
 }
-export async function controlBulk(action: 'start' | 'pause' | 'resume'): Promise<BulkJob> {
+function freshJob(): BulkJob {
+  return { id: randomUUID(), state: 'running', generation: 1, page: 0, pending: [], nextPage: null, total: null, discovered: 0, processed: 0, saved: 0, skipped: 0, withWebsite: 0, withEmail: 0, withPhone: 0, retries: 0, nextRunAt: 0, message: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+}
+export async function controlBulk(action: 'start' | 'pause' | 'resume' | 'focus', target = 1000): Promise<BulkJob> {
   await setup(); return transaction(async () => {
     let job = await bulkStatus();
     if (action === 'start') {
       if (job && job.state !== 'complete') throw new RegistryError('Import już istnieje. Użyj Wznów, aby zachować postęp.', 409);
-      job = { id: randomUUID(), state: 'running', generation: 1, page: 0, pending: [], nextPage: null, total: null, discovered: 0, processed: 0, saved: 0, skipped: 0, withWebsite: 0, withEmail: 0, withPhone: 0, retries: 0, nextRunAt: 0, message: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      job = freshJob();
       await query('INSERT INTO bulk_jobs VALUES (?,?,?)', [job.id, job.state, JSON.stringify(job)]);
+    } else if (action === 'focus') {
+      if (!Number.isSafeInteger(target) || target < 1 || target > 5000) throw new RegistryError('Cel musi wynosić od 1 do 5000 firm.', 400);
+      if (!job || job.state === 'complete') {
+        job = freshJob();
+        await query('INSERT INTO bulk_jobs VALUES (?,?,?)', [job.id, job.state, JSON.stringify(job)]);
+      }
+      if (job.selection) throw new RegistryError('Selekcja już istnieje. Użyj Wznów, aby zachować kolejkę.', 409);
+      const maxChecks = target * 10;
+      const qualified = await seedProspects(job.id, target, maxChecks);
+      job.selection = { target, maxChecks, checked: 0, qualified, excluded: 0 };
+      job.state = qualified >= target ? 'complete' : 'running';
+      if (qualified >= target) { job.selection.stopReason = 'target'; job.message = 'Zebrano docelową kolejkę firm.'; }
+      else job.message = '';
+      job.generation++; delete job.workflowId; job.nextRunAt = 0; job.retries = 0;
+      await batch([saveStatement(job)]);
     } else {
       if (!job || job.state === 'complete') throw new RegistryError('Brak importu do wznowienia lub wstrzymania.', 409);
       job.state = action === 'pause' ? 'paused' : 'running'; job.generation += 1; delete job.workflowId; job.message = ''; job.retries = 0;
@@ -67,18 +87,30 @@ export async function bulkStep(expectedId?: string, generation?: number) {
         job.pending = ids; job.nextPage = page.nextPage; job.total = page.total;
         job.discovered += ids.length; job.retries = 0; job.message = ''; job.nextRunAt = 0;
         if (!ids.length) { if (page.nextPage === null) job.state = 'complete'; else job.page = page.nextPage; }
+        if (job.state === 'complete' && job.selection) { job.selection.stopReason = 'exhausted'; job.message = 'Przejrzano dostępną listę CEIDG. Zebrano tylko znalezione dopasowania.'; }
         await batch([...ids.map(id => ({ sql: 'INSERT OR IGNORE INTO bulk_seen VALUES (?,?)', args: [job.id, id] })), saveStatement(job)]);
       });
     } else {
-      const ids = initial.pending.slice(0, initial.detailBatchSize || 25); const details = await ceidgDetails(ids);
+      const remainingChecks = initial.selection ? initial.selection.maxChecks - initial.selection.checked : 25;
+      const ids = initial.pending.slice(0, Math.min(initial.detailBatchSize || 25, remainingChecks)); const details = await ceidgDetails(ids);
       await transaction(async () => {
         const job = await bulkStatus(); if (!samePosition(job, initial)) return;
         const active = details.filter(firm => firm.registryStatus === 'AKTYWNY');
-        await upsertRegistry(active, 'CEIDG', false, false);
-        job.pending = job.pending.slice(ids.length); job.processed += ids.length; job.saved += active.length; job.skipped += ids.length - active.length;
-        job.withWebsite += active.filter(f => f.website).length; job.withEmail += active.filter(f => f.email).length; job.withPhone += active.filter(f => f.phone).length;
+        const accepted = job.selection ? active.filter(qualifiesForProspecting) : active;
+        const saved = await upsertRegistry(accepted, 'CEIDG', false, false);
+        if (job.selection) {
+          job.selection.qualified += await addProspects(job.id, saved, job.selection.target - job.selection.qualified);
+          job.selection.checked += ids.length; job.selection.excluded += ids.length - saved.filter(qualifiesForProspecting).length;
+        }
+        job.pending = job.pending.slice(ids.length); job.processed += ids.length; job.saved += saved.length; job.skipped += ids.length - saved.length;
+        job.withWebsite += saved.filter(f => f.website).length; job.withEmail += saved.filter(f => f.email).length; job.withPhone += saved.filter(f => f.phone).length;
         job.retries = 0; job.message = ''; job.nextRunAt = 0;
         if (!job.pending.length) { if (job.nextPage === null) job.state = 'complete'; else job.page = job.nextPage; }
+        if (job.selection) {
+          if (job.selection.qualified >= job.selection.target) { job.state = 'complete'; job.selection.stopReason = 'target'; job.message = 'Zebrano docelową kolejkę firm. Pobieranie zakończone.'; }
+          else if (job.selection.checked >= job.selection.maxChecks) { job.state = 'complete'; job.selection.stopReason = 'budget'; job.message = 'Osiągnięto limit sprawdzanych wpisów. Kolejka zawiera tylko znalezione dopasowania; nie osiągnięto celu.'; }
+          else if (job.state === 'complete') { job.selection.stopReason = 'exhausted'; job.message = 'Przejrzano dostępną listę CEIDG. Zebrano tylko znalezione dopasowania.'; }
+        }
         const writes = [saveStatement(job)];
         if (job.state === 'complete') writes.push({ sql: 'INSERT INTO imports(source,count,createdAt) VALUES (?,?,?)', args: ['CEIDG — import automatyczny', job.saved, new Date().toISOString()] });
         await batch(writes);

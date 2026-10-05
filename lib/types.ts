@@ -14,7 +14,10 @@ export type LeadAnalysis = {
   version: number;
   checkedAt?: string;
   priority: 'Sprawdź wcześniej' | 'Standardowy' | 'Brak podstaw';
-  opportunities: { channel: 'Strona WWW' | 'Allegro' | 'Amazon / eBay'; reason: string; confidence: 'Niska' | 'Umiarkowana' }[];
+  sector: 'Usługi' | 'Handel' | 'Pozostałe';
+  fitScore: number;
+  fitReasons: { points: number; label: string }[];
+  opportunities: { channel: 'Strona WWW' | 'Allegro' | 'Amazon / eBay'; reason: string; confidence: 'Niska' | 'Umiarkowana'; offer: string; benefit: string; questions: string[] }[];
   issues: string[];
   nextSteps: string[];
 };

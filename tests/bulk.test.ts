@@ -42,7 +42,7 @@ test('Cloud import checkpoints, retries, leases, pause during API response, resu
     const completed = await bulkStatus(); assert.equal(completed?.state, 'complete'); assert.equal(completed?.saved, 1); assert.equal(completed?.skipped, 1);
     assert.equal(completed?.withPhone, 1); assert.equal(completed?.withEmail, 1); assert.equal(completed?.withWebsite, 1);
     assert.equal((await companyPage()).companies[0].note, 'Preserve CRM');
-    assert.equal((await companyPage()).companies[0].analysis?.version, 1);
+    assert.equal((await companyPage()).companies[0].analysis?.version, 2);
     assert.ok(JSON.parse(String((await query('SELECT registry FROM companies WHERE id=?', [existing.id])).rows[0].registry)).analysis);
     await clearRate(); await controlBulk('start');
     globalThis.fetch = async () => new Response(null, { status: 429, headers: { 'Retry-After': '60' } });
