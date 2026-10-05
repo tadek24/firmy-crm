@@ -10,6 +10,15 @@ export type LeadStatus =
   | "Nie zainteresowany"
   | "Nie kontaktować";
 
+export type LeadAnalysis = {
+  version: number;
+  checkedAt?: string;
+  priority: 'Sprawdź wcześniej' | 'Standardowy' | 'Brak podstaw';
+  opportunities: { channel: 'Strona WWW' | 'Allegro' | 'Amazon / eBay'; reason: string; confidence: 'Niska' | 'Umiarkowana' }[];
+  issues: string[];
+  nextSteps: string[];
+};
+
 export type Company = {
   id: string;
   registryId: string;
@@ -27,6 +36,7 @@ export type Company = {
   pkdName: string;
   category: string;
   website?: string;
+  analysis?: LeadAnalysis;
   phone?: string;
   email?: string;
   status: LeadStatus;

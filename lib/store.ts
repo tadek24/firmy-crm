@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { batch, query, transaction, type Statement } from './database';
 import type { Company } from './types';
+import { analyzeCompany, ANALYSIS_VERSION } from './analysis';
 export const statuses = ['Nowy', 'Do sprawdzenia', 'Do kontaktu', 'Kontakt wykonany', 'Zainteresowany', 'Oferta wysłana', 'Negocjacje', 'Klient', 'Nie zainteresowany', 'Nie kontaktować'] as const;
 export type RegistryCompany = Omit<Company, 'status' | 'tags' | 'note' | 'online' | 'lastContact'>;
 let ready: Promise<void> | undefined;
@@ -34,7 +35,11 @@ async function initialize() {
   if (!(await query('SELECT 1 FROM metrics WHERE id=1')).rows.length) await query(`INSERT OR IGNORE INTO metrics SELECT 1,count(*),coalesce(sum(json_extract(crm,'$.status')='Do kontaktu'),0),coalesce(sum(json_extract(crm,'$.status') IN ('Zainteresowany','Oferta wysłana','Negocjacje')),0),coalesce(sum(coalesce(json_extract(registry,'$.website'),'')!=''),0),coalesce(sum(coalesce(json_extract(registry,'$.email'),'')!=''),0),coalesce(sum(coalesce(json_extract(registry,'$.phone'),'')!=''),0) FROM companies`);
 }
 type Row = { id: string; registry: string; crm: string };
-function unpack(row: Row): Company { return { ...JSON.parse(row.registry), ...JSON.parse(row.crm), id: row.id }; }
+function unpack(row: Row): Company {
+  const company: Company = { ...JSON.parse(row.registry), ...JSON.parse(row.crm), id: row.id };
+  if (company.analysis?.version !== ANALYSIS_VERSION) company.analysis = analyzeCompany(company);
+  return company;
+}
 export async function listCompanies() { await setup(); return ((await query('SELECT * FROM companies ORDER BY rowid DESC')).rows as Row[]).map(unpack); }
 export async function companyPage(search = '', status = 'Wszystkie', category = 'Wszystkie', page = 0) {
   await setup(); const clauses: string[] = [], parameters: string[] = [];
@@ -76,6 +81,7 @@ export async function upsertRegistry(items: RegistryCompany[], source: string, m
       const existing = found[0], old = existing ? unpack(existing) : null, id = existing?.id || randomUUID();
       const registry = { ...item, id, nip: item.nip || old?.nip || '', regon: item.regon || old?.regon, krs: item.krs || old?.krs, search: [item.name, item.nip, item.regon, item.krs, item.city, item.pkdMain].join(' ').toLocaleLowerCase('pl') };
       const crm = existing ? JSON.parse(existing.crm) : { status: 'Nowy', tags: [], online: [], note: '' };
+      registry.analysis = analyzeCompany(registry);
       writes.push({ sql: 'INSERT INTO companies VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET source=excluded.source,registryId=excluded.registryId,nip=excluded.nip,regon=excluded.regon,krs=excluded.krs,registry=excluded.registry', args: [id, registry.source, registry.registryId, registry.nip || null, registry.regon || null, registry.krs || null, JSON.stringify(registry), JSON.stringify(crm)] });
       result.push({ ...registry, ...crm });
     });

@@ -6,6 +6,7 @@ export type BulkJob = {
   id: string; state: 'running' | 'paused' | 'complete' | 'failed';
   generation: number; workflowId?: string;
   page: number; pending: string[]; nextPage: number | null; total: number | null;
+  detailBatchSize?: number;
   discovered: number; processed: number; saved: number; skipped: number;
   withWebsite: number; withEmail: number; withPhone: number;
   retries: number; nextRunAt: number; message: string; createdAt: string; updatedAt: string;
@@ -69,7 +70,7 @@ export async function bulkStep(expectedId?: string, generation?: number) {
         await batch([...ids.map(id => ({ sql: 'INSERT OR IGNORE INTO bulk_seen VALUES (?,?)', args: [job.id, id] })), saveStatement(job)]);
       });
     } else {
-      const ids = initial.pending.slice(0, 25); const details = await ceidgDetails(ids);
+      const ids = initial.pending.slice(0, initial.detailBatchSize || 25); const details = await ceidgDetails(ids);
       await transaction(async () => {
         const job = await bulkStatus(); if (!samePosition(job, initial)) return;
         const active = details.filter(firm => firm.registryStatus === 'AKTYWNY');
@@ -87,6 +88,17 @@ export async function bulkStep(expectedId?: string, generation?: number) {
     await transaction(async () => {
       const job = await bulkStatus(); if (!samePosition(job, initial)) return;
       const registryError = error instanceof RegistryError ? error : null;
+      // Production can impose a smaller detail limit than its published examples.
+      // Reduce only on the explicit identifier-count error; never skip pending entries.
+      if (registryError?.upstreamStatus === 400 && /Maksymalna ilość identyfikatorów wpisów/i.test(registryError.message) && initial.pending.length > 1) {
+        const attempted = Math.min(initial.detailBatchSize || 25, initial.pending.length);
+        if (attempted > 1) {
+          job.detailBatchSize = Math.max(1, Math.floor(attempted / 2));
+          job.nextRunAt = Date.now() + 4000; job.retries = 0;
+          job.message = `CEIDG ogranicza liczbę szczegółów w zapytaniu. Import będzie kontynuowany w partiach do ${job.detailBatchSize} firm.`;
+          await batch([saveStatement(job)]); return;
+        }
+      }
       const temporary = registryError && (registryError.status === 429 || (registryError.status === 502 && (!registryError.upstreamStatus || registryError.upstreamStatus >= 500)));
       job.retries += 1; job.message = registryError?.message || 'Nie udało się zapisać partii. Sprawdź bazę lub konflikt identyfikatorów; postęp zachowany.';
       if (temporary && job.retries <= 10) job.nextRunAt = Date.now() + (registryError.status === 429 ? retryDelay(registryError.retryAfter) : Math.min(600000, 10000 * 2 ** job.retries));
