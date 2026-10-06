@@ -73,7 +73,7 @@ export async function companyPage(search = '', status = 'Wszystkie', category = 
   if (contactFilter === 'any') clauses.push(`(${contactPresent('email')}=1 OR ${contactPresent('phone')}=1 OR ${contactPresent('website')}=1)`);
   if (contactFilter === 'none') clauses.push(`(${contactPresent('email')}=0 AND ${contactPresent('phone')}=0 AND ${contactPresent('website')}=0)`);
   if (scope === 'prospects') {
-    clauses.push("EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id AND jobId=(SELECT id FROM bulk_jobs ORDER BY rowid DESC LIMIT 1))");
+    clauses.push("EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id)");
     clauses.push("json_extract(crm,'$.status') NOT IN ('Nie kontaktować','Nie zainteresowany','Klient')");
   }
   const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
@@ -92,10 +92,10 @@ export async function companyPage(search = '', status = 'Wszystkie', category = 
   ]);
   return { companies, total, page: currentPage, pageSize: 100, stats, categories: summary[1].rows.map(row => row.category), assignees: labels[0].rows.map(row => String(row.name)), tags: labels[1].rows.map(row => String(row.name)) };
 }
-export async function addProspects(jobId: string, companies: Company[], remaining: number) {
-  const eligible = companies.filter(qualifiesForProspecting);
+export async function addProspects(jobId: string, companies: Company[], remaining: number, options: { minStartedAt?: string; maxStartedAt?: string } = {}) {
+  const eligible = companies.filter(company => qualifiesForProspecting(company, options));
   if (!eligible.length || remaining <= 0) return 0;
-  const current = (await query(`SELECT companyId FROM prospect_members WHERE jobId=? AND companyId IN (${eligible.map(() => '?').join(',')})`, [jobId, ...eligible.map(company => company.id)])).rows.map(row => row.companyId);
+  const current = (await query(`SELECT companyId FROM prospect_members WHERE companyId IN (${eligible.map(() => '?').join(',')})`, eligible.map(company => company.id))).rows.map(row => row.companyId);
   const next = eligible.filter(company => !current.includes(company.id)).slice(0, remaining);
   const writes = next.flatMap(company => [
     { sql: "UPDATE companies SET registry=json_set(registry,'$.analysis',json(?)) WHERE id=?", args: [JSON.stringify(analyzeCompany(company)), company.id] },
@@ -108,10 +108,10 @@ export async function addProspects(jobId: string, companies: Company[], remainin
   }
   return added;
 }
-export async function seedProspects(jobId: string, target: number, maxChecks: number) {
-  const rows = (await query(`SELECT * FROM companies WHERE source='CEIDG' AND json_extract(registry,'$.registryStatus')='AKTYWNY' AND (${contactPresent('email')}=1 OR ${contactPresent('phone')}=1) ORDER BY rowid DESC LIMIT ?`, [maxChecks])).rows as Row[];
-  const candidates = rows.map(unpack).filter(qualifiesForProspecting).sort((a,b) => (b.analysis?.fitScore || 0) - (a.analysis?.fitScore || 0));
-  return addProspects(jobId, candidates.slice(0, target), target);
+export async function seedProspects(jobId: string, target: number, maxChecks: number, options: { minStartedAt?: string; maxStartedAt?: string } = {}) {
+  const rows = (await query(`SELECT * FROM companies WHERE source='CEIDG' AND json_extract(registry,'$.registryStatus')='AKTYWNY' AND (${contactPresent('email')}=1 OR ${contactPresent('phone')}=1) AND (? IS NULL OR json_extract(registry,'$.startedAt')>=?) AND (? IS NULL OR json_extract(registry,'$.startedAt')<=?) AND NOT EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id) ORDER BY rowid DESC LIMIT ?`, [options.minStartedAt || null, options.minStartedAt || null, options.maxStartedAt || null, options.maxStartedAt || null, maxChecks])).rows as Row[];
+  const candidates = rows.map(unpack).filter(company => qualifiesForProspecting(company, options)).sort((a,b) => (b.analysis?.fitScore || 0) - (a.analysis?.fitScore || 0));
+  return addProspects(jobId, candidates.slice(0, target), target, options);
 }
 export async function recentImports() { await setup(); return (await query('SELECT * FROM imports ORDER BY id DESC LIMIT 8')).rows; }
 export class CeidgRateLimitError extends Error {
