@@ -43,6 +43,9 @@ export type Company = {
   phone?: string;
   email?: string;
   status: LeadStatus;
+  assignee?: string;
+  crmRevision?: string;
+  crmUpdatedAt?: string;
   tags: string[];
   online: string[];
   lastContact?: string;

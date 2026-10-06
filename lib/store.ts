@@ -6,7 +6,7 @@ import { parseContactFilter } from './contact-filters';
 import { qualifiesForProspecting } from './prospecting';
 const contactPresent = (field: 'email' | 'phone' | 'website') => `(trim(coalesce(json_extract(registry,'$.${field}'),''))!='')`;
 export const statuses = ['Nowy', 'Do sprawdzenia', 'Do kontaktu', 'Kontakt wykonany', 'Zainteresowany', 'Oferta wysłana', 'Negocjacje', 'Klient', 'Nie zainteresowany', 'Nie kontaktować'] as const;
-export type RegistryCompany = Omit<Company, 'status' | 'tags' | 'note' | 'online' | 'lastContact'>;
+export type RegistryCompany = Omit<Company, 'status' | 'tags' | 'note' | 'online' | 'lastContact' | 'assignee' | 'crmRevision' | 'crmUpdatedAt'>;
 let ready: Promise<void> | undefined;
 export function setup() {
   if (!ready) ready = initialize().catch(error => { ready = undefined; throw error; });
@@ -23,6 +23,7 @@ async function initialize() {
     'CREATE INDEX IF NOT EXISTS api_request_time ON api_requests(createdAt)',
     "CREATE INDEX IF NOT EXISTS company_status ON companies(json_extract(crm,'$.status'))",
     "CREATE INDEX IF NOT EXISTS company_category ON companies(json_extract(registry,'$.category'))",
+    "CREATE INDEX IF NOT EXISTS company_assignee ON companies(json_extract(crm,'$.assignee'))",
     ...(['email', 'phone', 'website'] as const).map(field => `CREATE INDEX IF NOT EXISTS company_contact_${field} ON companies(${contactPresent(field)})`),
     'CREATE TABLE IF NOT EXISTS metrics (id INTEGER PRIMARY KEY, total INTEGER NOT NULL, toContact INTEGER NOT NULL, active INTEGER NOT NULL, website INTEGER NOT NULL, email INTEGER NOT NULL, phone INTEGER NOT NULL)',
     'CREATE TABLE IF NOT EXISTS bulk_jobs (id TEXT PRIMARY KEY, state TEXT NOT NULL, data TEXT NOT NULL)',
@@ -42,11 +43,13 @@ async function initialize() {
 type Row = { id: string; registry: string; crm: string };
 function unpack(row: Row): Company {
   const company: Company = { ...JSON.parse(row.registry), ...JSON.parse(row.crm), id: row.id };
+  company.assignee ||= '';
+  company.crmRevision ||= '0';
   if (company.analysis?.version !== ANALYSIS_VERSION) company.analysis = analyzeCompany(company);
   return company;
 }
 export async function listCompanies() { await setup(); return ((await query('SELECT * FROM companies ORDER BY rowid DESC')).rows as Row[]).map(unpack); }
-export async function companyPage(search = '', status = 'Wszystkie', category = 'Wszystkie', page = 0, contact = 'all', scope = 'all') {
+export async function companyPage(search = '', status = 'Wszystkie', category = 'Wszystkie', page = 0, contact = 'all', scope = 'all', owner = '', tag = '') {
   await setup(); const clauses: string[] = [], parameters: string[] = [];
   if (search.trim()) {
     clauses.push("(coalesce(json_extract(registry,'$.search'),lower(registry)) || coalesce(json_extract(crm,'$.searchTags'),lower(json_extract(crm,'$.tags')))) LIKE ? ESCAPE '\\'");
@@ -54,6 +57,9 @@ export async function companyPage(search = '', status = 'Wszystkie', category = 
   }
   if (status !== 'Wszystkie') { clauses.push("json_extract(crm,'$.status')=?"); parameters.push(status); }
   if (category !== 'Wszystkie') { clauses.push("json_extract(registry,'$.category')=?"); parameters.push(category); }
+  if (owner === 'unassigned') clauses.push("trim(coalesce(json_extract(crm,'$.assignee'),''))=''");
+  else if (owner.startsWith('person:')) { clauses.push("json_extract(crm,'$.assignee')=?"); parameters.push(owner.slice(7)); }
+  if (tag) { clauses.push("EXISTS(SELECT 1 FROM json_each(companies.crm,'$.tags') WHERE value=?)"); parameters.push(tag); }
   const contactFilter = parseContactFilter(contact);
   if (['email', 'phone', 'website'].includes(contactFilter)) clauses.push(`${contactPresent(contactFilter as 'email' | 'phone' | 'website')}=1`);
   if (contactFilter === 'direct') clauses.push(`(${contactPresent('email')}=1 OR ${contactPresent('phone')}=1)`);
@@ -69,7 +75,11 @@ export async function companyPage(search = '', status = 'Wszystkie', category = 
   const currentPage = Math.min(Math.max(0, page), Math.max(0, Math.ceil(total / 100) - 1));
   const order = scope === 'prospects' ? "coalesce(json_extract(registry,'$.analysis.fitScore'),0) DESC,rowid DESC" : 'rowid DESC';
   const companies = ((await query(`SELECT * FROM companies${where} ORDER BY ${order} LIMIT 100 OFFSET ?`, [...parameters, currentPage * 100])).rows as Row[]).map(unpack);
-  return { companies, total, page: currentPage, pageSize: 100, stats, categories: summary[1].rows.map(row => row.category) };
+  const labels = await batch([
+    { sql: "SELECT DISTINCT json_extract(crm,'$.assignee') AS name FROM companies WHERE trim(coalesce(json_extract(crm,'$.assignee'),''))!='' ORDER BY name" },
+    { sql: "SELECT DISTINCT value AS name FROM companies,json_each(companies.crm,'$.tags') ORDER BY name" },
+  ]);
+  return { companies, total, page: currentPage, pageSize: 100, stats, categories: summary[1].rows.map(row => row.category), assignees: labels[0].rows.map(row => String(row.name)), tags: labels[1].rows.map(row => String(row.name)) };
 }
 export async function addProspects(jobId: string, companies: Company[], remaining: number) {
   const eligible = companies.filter(qualifiesForProspecting);
@@ -116,10 +126,10 @@ export async function upsertRegistry(items: RegistryCompany[], source: string, m
       if (found.length > 1) throw new Error('Konflikt identyfikatorów: wymagane ręczne sprawdzenie firmy. Import nie został zapisany.');
       const existing = found[0], old = existing ? unpack(existing) : null, id = existing?.id || randomUUID();
       const registry = { ...item, id, nip: item.nip || old?.nip || '', regon: item.regon || old?.regon, krs: item.krs || old?.krs, search: [item.name, item.nip, item.regon, item.krs, item.city, item.pkdMain].join(' ').toLocaleLowerCase('pl') };
-      const crm = existing ? JSON.parse(existing.crm) : { status: 'Nowy', tags: [], online: [], note: '' };
+      const crm = existing ? JSON.parse(existing.crm) : { status: 'Nowy', tags: [], online: [], note: '', assignee: '', crmRevision: '0' };
       registry.analysis = analyzeCompany(registry);
       writes.push({ sql: 'INSERT INTO companies VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET source=excluded.source,registryId=excluded.registryId,nip=excluded.nip,regon=excluded.regon,krs=excluded.krs,registry=excluded.registry', args: [id, registry.source, registry.registryId, registry.nip || null, registry.regon || null, registry.krs || null, JSON.stringify(registry), JSON.stringify(crm)] });
-      result.push({ ...registry, ...crm });
+      result.push({ ...registry, ...crm, assignee: crm.assignee || '', crmRevision: crm.crmRevision || '0' });
     });
     if (logImport) writes.push({ sql: 'INSERT INTO imports(source,count,createdAt) VALUES (?,?,?)', args: [source, items.length, new Date().toISOString()] });
     if (writes.length) await batch(writes);
@@ -127,10 +137,13 @@ export async function upsertRegistry(items: RegistryCompany[], source: string, m
   };
   return manageTransaction ? transaction(write) : write();
 }
+export class CrmConflictError extends Error {}
 export async function updateCrm(id: string, patch: unknown): Promise<Company> {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Nieprawidłowe dane CRM.');
   const data = patch as Record<string, unknown>;
-  if (Object.keys(data).some(key => !['status','tags','note'].includes(key))) throw new Error('Możesz zmieniać tylko status, etykiety i notatkę.');
+  if (Object.keys(data).some(key => !['status','tags','note','assignee','crmRevision'].includes(key))) throw new Error('Możesz zmieniać tylko status, osobę odpowiedzialną, etykiety i notatkę.');
+  if (typeof data.crmRevision !== 'string' || data.crmRevision.length > 80) throw new CrmConflictError('Odśwież aplikację przed zapisaniem zmian.');
+  if ('assignee' in data && (typeof data.assignee !== 'string' || data.assignee.length > 80 || /[\u0000-\u001f]/.test(data.assignee))) throw new Error('Nieprawidłowa osoba odpowiedzialna.');
   if ('status' in data && !statuses.includes(data.status as typeof statuses[number])) throw new Error('Nieprawidłowy status.');
   if ('note' in data && (typeof data.note !== 'string' || data.note.length > 20000)) throw new Error('Nieprawidłowa notatka.');
   if ('tags' in data && (!Array.isArray(data.tags) || data.tags.length > 30 || data.tags.some(tag => typeof tag !== 'string' || !tag.trim() || tag.length > 80))) throw new Error('Nieprawidłowe etykiety.');
@@ -138,8 +151,13 @@ export async function updateCrm(id: string, patch: unknown): Promise<Company> {
   return transaction(async () => {
     const row = (await query('SELECT * FROM companies WHERE id=?', [id])).rows[0] as Row | undefined;
     if (!row) throw new Error('Firma nie istnieje.');
-    const crm = { ...JSON.parse(row.crm), ...data };
-    crm.tags = [...new Set(crm.tags.map((tag: string) => tag.trim()))]; crm.searchTags = crm.tags.join(' ').toLocaleLowerCase('pl');
+    const previous = JSON.parse(row.crm);
+    if (data.crmRevision !== (previous.crmRevision || '0')) throw new CrmConflictError('Ktoś zmienił tę firmę. Wczytaj aktualne dane przed ponownym zapisem; Twój szkic nie został zapisany.');
+    const crm = { ...previous, ...data, crmRevision: randomUUID(), crmUpdatedAt: new Date().toISOString() };
+    if (data.status === 'Kontakt wykonany' && previous.status !== 'Kontakt wykonany') crm.lastContact = crm.crmUpdatedAt;
+    crm.assignee = (crm.assignee || '').trim();
+    crm.tags = [...new Map<string, string>(crm.tags.map((tag: string) => [tag.trim().toLocaleLowerCase('pl'), tag.trim()])).values()];
+    crm.searchTags = [...crm.tags, crm.assignee].join(' ').toLocaleLowerCase('pl');
     await query('UPDATE companies SET crm=? WHERE id=?', [JSON.stringify(crm), id]);
     return unpack({ ...row, crm: JSON.stringify(crm) });
   });
