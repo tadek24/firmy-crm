@@ -11,7 +11,8 @@ export async function GET(request: Request) {
     const user = await requireUser();
     const params = new URL(request.url).searchParams;
     const value = Number(params.get('page') || 0); const page = Number.isSafeInteger(value) ? Math.max(0, value) : 0;
-    return Response.json({ ...await companyPage((params.get('q') || '').slice(0, 200), params.get('status') || 'Wszystkie', params.get('category') || 'Wszystkie', page, parseContactFilter(params.get('contact')), params.get('scope') === 'prospects' ? 'prospects' : 'all', (params.get('owner') || '').slice(0, 87), (params.get('tag') || '').slice(0, 80)), user, people: await teamDirectory(), imports: await recentImports(), aiConfigured: aiConfigured(), ceidgConfigured: Boolean(process.env.CEIDG_API_TOKEN?.trim()) }, { headers: { 'Cache-Control': 'no-store' } });
+    const sort = ['fit', 'startedAsc', 'startedDesc'].includes(params.get('sort') || '') ? params.get('sort') || 'fit' : 'fit';
+    return Response.json({ ...await companyPage((params.get('q') || '').slice(0, 200), params.get('status') || 'Wszystkie', params.get('category') || 'Wszystkie', page, parseContactFilter(params.get('contact')), params.get('scope') === 'prospects' ? 'prospects' : 'all', (params.get('owner') || '').slice(0, 87), (params.get('tag') || '').slice(0, 80), sort), user, people: await teamDirectory(), imports: await recentImports(), aiConfigured: aiConfigured(), ceidgConfigured: Boolean(process.env.CEIDG_API_TOKEN?.trim()) }, { headers: { 'Cache-Control': 'no-store' } });
   }
   catch (error) { return errorResponse(error); }
 }
