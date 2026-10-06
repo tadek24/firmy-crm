@@ -9,7 +9,7 @@ export async function GET(request: Request) {
     await requireUser();
     const params = new URL(request.url).searchParams;
     const value = Number(params.get('page') || 0); const page = Number.isSafeInteger(value) ? Math.max(0, value) : 0;
-    return Response.json({ ...await companyPage((params.get('q') || '').slice(0, 200), params.get('status') || 'Wszystkie', params.get('category') || 'Wszystkie', page, parseContactFilter(params.get('contact')), params.get('scope') === 'prospects' ? 'prospects' : 'all'), imports: await recentImports(), ceidgConfigured: Boolean(process.env.CEIDG_API_TOKEN?.trim()) });
+    return Response.json({ ...await companyPage((params.get('q') || '').slice(0, 200), params.get('status') || 'Wszystkie', params.get('category') || 'Wszystkie', page, parseContactFilter(params.get('contact')), params.get('scope') === 'prospects' ? 'prospects' : 'all', (params.get('owner') || '').slice(0, 87), (params.get('tag') || '').slice(0, 80)), imports: await recentImports(), ceidgConfigured: Boolean(process.env.CEIDG_API_TOKEN?.trim()) });
   }
   catch (error) { return errorResponse(error); }
 }
