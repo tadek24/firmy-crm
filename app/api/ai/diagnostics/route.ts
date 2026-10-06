@@ -1,13 +1,18 @@
 import { requireUser } from '@/lib/auth';
 import { requireAdminAccount } from '@/lib/accounts';
-import { aiConfigured, aiProvider, GEMINI_MODEL } from '@/lib/ai-analysis';
+import { aiConfigured, aiProvider, AI_MODEL, GEMINI_MODEL } from '@/lib/ai-analysis';
 import { errorResponse } from '@/lib/http';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 export async function GET() {
   try {
     requireAdminAccount(await requireUser());
-    if(aiProvider()!=='gemini' || !aiConfigured()) return Response.json({configured:false},{headers:{'Cache-Control':'no-store'}});
+    const provider=aiProvider();
+    if(!aiConfigured()) return Response.json({configured:false,provider},{headers:{'Cache-Control':'no-store'}});
+    if(provider==='openai') {
+      const response=await fetch(`https://api.openai.com/v1/models/${AI_MODEL}`,{headers:{Authorization:`Bearer ${process.env.OPENAI_API_KEY!.trim()}`},signal:AbortSignal.timeout(20000),redirect:'error',cache:'no-store'});
+      return Response.json({configured:true,provider,model:AI_MODEL,listStatus:response.status,keyRejected:[401,403].includes(response.status),available:response.ok,models:response.ok ? [AI_MODEL] : []},{headers:{'Cache-Control':'no-store'}});
+    }
     const response=await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=100',{headers:{'x-goog-api-key':process.env.GEMINI_API_KEY!.trim()},signal:AbortSignal.timeout(20000),redirect:'error',cache:'no-store'});
     const data=await response.json().catch(()=>({}));
     const models=Array.isArray(data.models) ? data.models.filter((item: {name?:unknown;supportedGenerationMethods?:string[]})=>typeof item.name==='string' && /^models\/gemini-[a-z0-9.-]+$/.test(item.name) && item.supportedGenerationMethods?.includes('generateContent')).map((item: {name:string})=>item.name.slice(7)) : [];
