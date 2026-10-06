@@ -8,7 +8,7 @@ export type BulkJob = {
   generation: number; workflowId?: string;
   page: number; pending: string[]; nextPage: number | null; total: number | null;
   detailBatchSize?: number;
-  selection?: { target: number; maxChecks: number; checked: number; qualified: number; excluded: number; stopReason?: 'target' | 'budget' | 'exhausted' };
+  selection?: { target: number; maxChecks: number; checked: number; qualified: number; excluded: number; minStartedAt?: string; maxStartedAt?: string; stopReason?: 'target' | 'budget' | 'exhausted' };
   discovered: number; processed: number; saved: number; skipped: number;
   withWebsite: number; withEmail: number; withPhone: number;
   retries: number; nextRunAt: number; message: string; createdAt: string; updatedAt: string;
@@ -23,6 +23,11 @@ function saveStatement(job: BulkJob): Statement {
 }
 function freshJob(): BulkJob {
   return { id: randomUUID(), state: 'running', generation: 1, page: 0, pending: [], nextPage: null, total: null, discovered: 0, processed: 0, saved: 0, skipped: 0, withWebsite: 0, withEmail: 0, withPhone: 0, retries: 0, nextRunAt: 0, message: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+}
+function recentWindow(years = 5) {
+  const now = new Date();
+  const cutoff = new Date(Date.UTC(now.getUTCFullYear() - years, now.getUTCMonth(), now.getUTCDate()));
+  return { minStartedAt: cutoff.toISOString().slice(0, 10), maxStartedAt: now.toISOString().slice(0, 10) };
 }
 export async function controlBulk(action: 'start' | 'pause' | 'resume' | 'focus', target = 1000): Promise<BulkJob> {
   await setup(); return transaction(async () => {
@@ -39,8 +44,9 @@ export async function controlBulk(action: 'start' | 'pause' | 'resume' | 'focus'
       }
       if (job.selection) throw new RegistryError('Selekcja już istnieje. Użyj Wznów, aby zachować kolejkę.', 409);
       const maxChecks = target * 10;
-      const qualified = await seedProspects(job.id, target, maxChecks);
-      job.selection = { target, maxChecks, checked: 0, qualified, excluded: 0 };
+      const window = recentWindow(5);
+      const qualified = await seedProspects(job.id, target, maxChecks, window);
+      job.selection = { target, maxChecks, checked: 0, qualified, excluded: 0, ...window };
       job.state = qualified >= target ? 'complete' : 'running';
       if (qualified >= target) { job.selection.stopReason = 'target'; job.message = 'Zebrano docelową kolejkę firm.'; }
       else job.message = '';
@@ -96,10 +102,11 @@ export async function bulkStep(expectedId?: string, generation?: number) {
       await transaction(async () => {
         const job = await bulkStatus(); if (!samePosition(job, initial)) return;
         const active = details.filter(firm => firm.registryStatus === 'AKTYWNY');
-        const accepted = job.selection ? active.filter(qualifiesForProspecting) : active;
+        const options = job.selection ? { minStartedAt: job.selection.minStartedAt, maxStartedAt: job.selection.maxStartedAt } : {};
+        const accepted = job.selection ? active.filter(firm => qualifiesForProspecting(firm, options)) : active;
         const saved = await upsertRegistry(accepted, 'CEIDG', false, false);
         if (job.selection) {
-          job.selection.qualified += await addProspects(job.id, saved, job.selection.target - job.selection.qualified);
+          job.selection.qualified += await addProspects(job.id, saved, job.selection.target - job.selection.qualified, options);
           job.selection.checked += ids.length; job.selection.excluded += ids.length - saved.filter(qualifiesForProspecting).length;
         }
         job.pending = job.pending.slice(ids.length); job.processed += ids.length; job.saved += saved.length; job.skipped += ids.length - saved.length;
