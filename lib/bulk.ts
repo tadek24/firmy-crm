@@ -3,12 +3,15 @@ import { batch, query, transaction, type Statement } from './database';
 import { setup, upsertRegistry, seedProspects, addProspects } from './store';
 import { qualifiesForProspecting } from './prospecting';
 import { ceidgActivePage, ceidgDetails, RegistryError } from './registries';
+export type BulkSelection = { target: number; maxChecks: number; checked: number; qualified: number; excluded: number; minStartedAt?: string; maxStartedAt?: string; stopReason?: 'target' | 'budget' | 'exhausted' };
+export type YearSelection = BulkSelection & { year: number };
 export type BulkJob = {
   id: string; state: 'running' | 'paused' | 'complete' | 'failed';
   generation: number; workflowId?: string;
   page: number; pending: string[]; nextPage: number | null; total: number | null;
   detailBatchSize?: number;
-  selection?: { target: number; maxChecks: number; checked: number; qualified: number; excluded: number; minStartedAt?: string; maxStartedAt?: string; stopReason?: 'target' | 'budget' | 'exhausted' };
+  selection?: BulkSelection;
+  yearly?: { from: number; to: number; index: number; years: YearSelection[] };
   discovered: number; processed: number; saved: number; skipped: number;
   withWebsite: number; withEmail: number; withPhone: number;
   retries: number; nextRunAt: number; message: string; createdAt: string; updatedAt: string;
@@ -29,10 +32,43 @@ function recentWindow(years = 5) {
   const cutoff = new Date(Date.UTC(now.getUTCFullYear() - years, now.getUTCMonth(), now.getUTCDate()));
   return { minStartedAt: cutoff.toISOString().slice(0, 10), maxStartedAt: now.toISOString().slice(0, 10) };
 }
-export async function controlBulk(action: 'start' | 'pause' | 'resume' | 'focus', target = 1000): Promise<BulkJob> {
+function currentSelection(job: BulkJob) { return job.yearly ? job.yearly.years[job.yearly.index] : job.selection; }
+function advanceYear(job: BulkJob, reason: NonNullable<BulkSelection['stopReason']>) {
+  if (!job.yearly) return;
+  const campaign = job.yearly;
+  campaign.years[campaign.index].stopReason = reason;
+  while (campaign.index + 1 < campaign.years.length) {
+    campaign.index++;
+    const next = campaign.years[campaign.index];
+    if (next.qualified >= next.target) { next.stopReason = 'target'; continue; }
+    job.state = 'running'; job.page = 0; job.pending = []; job.nextPage = null; job.total = null;
+    job.message = ''; job.retries = 0; job.nextRunAt = 0;
+    return;
+  }
+  job.state = 'complete'; job.pending = [];
+  job.message = campaign.years.every(year => year.stopReason === 'target')
+    ? 'Zebrano docelową liczbę firm z każdego rocznika.'
+    : 'Import roczników zakończony. Niektóre roczniki mają mniej dopasowań niż cel; sprawdź ich liczniki.';
+}
+export async function controlBulk(action: 'start' | 'pause' | 'resume' | 'focus' | 'yearly', target = 1000, from = 2020, to = new Date().getUTCFullYear()): Promise<BulkJob> {
   await setup(); return transaction(async () => {
     let job = await bulkStatus();
-    if (action === 'start') {
+    if (action === 'yearly') {
+      const today = new Date().toISOString().slice(0, 10), thisYear = Number(today.slice(0, 4));
+      if (!Number.isSafeInteger(target) || target < 1 || target > 5000 || !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 1900 || to > thisYear || from > to || to - from > 19) throw new RegistryError('Nieprawidłowy zakres lat lub cel importu.', 400);
+      if (job?.state === 'running') throw new RegistryError('Wstrzymaj trwający import przed rozpoczęciem nowego zakresu.', 409);
+      job = freshJob();
+      job.yearly = { from, to, index: 0, years: [] };
+      await query('INSERT INTO bulk_jobs VALUES (?,?,?)', [job.id, job.state, JSON.stringify(job)]);
+      for (let year = from; year <= to; year++) {
+        const dates = { minStartedAt: `${year}-01-01`, maxStartedAt: year === thisYear ? today : `${year}-12-31` };
+        const maxChecks = target * 100;
+        const qualified = await seedProspects(job.id, target, maxChecks, { ...dates, includeExisting: true });
+        job.yearly.years.push({ year, target, maxChecks, checked: 0, qualified, excluded: 0, ...dates, ...(qualified >= target ? { stopReason: 'target' as const } : {}) });
+      }
+      if (job.yearly.years[0].qualified >= target) advanceYear(job, 'target');
+      await batch([saveStatement(job)]);
+    } else if (action === 'start') {
       if (job && job.state !== 'complete') throw new RegistryError('Import już istnieje. Użyj Wznów, aby zachować postęp.', 409);
       job = freshJob();
       await query('INSERT INTO bulk_jobs VALUES (?,?,?)', [job.id, job.state, JSON.stringify(job)]);
@@ -77,14 +113,14 @@ export function retryDelay(value?: string, now = Date.now()) {
   const date = Date.parse(value); return Number.isFinite(date) ? Math.max(4000, date - now) : 60000;
 }
 function samePosition(job: BulkJob | null, initial: BulkJob): job is BulkJob {
-  return Boolean(job && job.id === initial.id && job.generation === initial.generation && job.page === initial.page && JSON.stringify(job.pending) === JSON.stringify(initial.pending));
+  return Boolean(job && job.id === initial.id && job.generation === initial.generation && job.yearly?.index === initial.yearly?.index && job.page === initial.page && JSON.stringify(job.pending) === JSON.stringify(initial.pending));
 }
 export async function bulkStep(expectedId?: string, generation?: number) {
   const initial = await bulkStatus();
   if (!initial || initial.state !== 'running' || initial.nextRunAt > Date.now() || (expectedId && (initial.id !== expectedId || initial.generation !== generation))) return;
   try {
     if (!initial.pending.length) {
-      const page = await ceidgActivePage(initial.page);
+      const page = await ceidgActivePage(initial.page, currentSelection(initial));
       await transaction(async () => {
         const job = await bulkStatus(); if (!samePosition(job, initial)) return;
         const seen = page.ids.length ? (await query(`SELECT registryId FROM bulk_seen WHERE jobId=? AND registryId IN (${page.ids.map(() => '?').join(',')})`, [job.id, ...page.ids])).rows.map(row => row.registryId) : [];
@@ -94,29 +130,33 @@ export async function bulkStep(expectedId?: string, generation?: number) {
         job.discovered += ids.length; job.retries = 0; job.message = ''; job.nextRunAt = 0;
         if (!ids.length) { if (page.nextPage === null) job.state = 'complete'; else job.page = page.nextPage; }
         if (job.state === 'complete' && job.selection) { job.selection.stopReason = 'exhausted'; job.message = 'Przejrzano dostępną listę CEIDG. Zebrano tylko znalezione dopasowania.'; }
+        if (job.state === 'complete' && job.yearly) advanceYear(job, 'exhausted');
         await batch([...ids.map(id => ({ sql: 'INSERT OR IGNORE INTO bulk_seen VALUES (?,?)', args: [job.id, id] })), saveStatement(job)]);
       });
     } else {
-      const remainingChecks = initial.selection ? initial.selection.maxChecks - initial.selection.checked : 25;
+      const initialSelection = currentSelection(initial);
+      const remainingChecks = initialSelection ? initialSelection.maxChecks - initialSelection.checked : 25;
       const ids = initial.pending.slice(0, Math.min(initial.detailBatchSize || 25, remainingChecks)); const details = await ceidgDetails(ids);
       await transaction(async () => {
         const job = await bulkStatus(); if (!samePosition(job, initial)) return;
         const active = details.filter(firm => firm.registryStatus === 'AKTYWNY');
-        const options = job.selection ? { minStartedAt: job.selection.minStartedAt, maxStartedAt: job.selection.maxStartedAt } : {};
-        const accepted = job.selection ? active.filter(firm => qualifiesForProspecting(firm, options)) : active;
+        const selection = currentSelection(job);
+        const options = selection ? { minStartedAt: selection.minStartedAt, maxStartedAt: selection.maxStartedAt, includeExisting: Boolean(job.yearly) } : {};
+        const accepted = selection ? active.filter(firm => qualifiesForProspecting(firm, options)) : active;
         const saved = await upsertRegistry(accepted, 'CEIDG', false, false);
-        if (job.selection) {
-          job.selection.qualified += await addProspects(job.id, saved, job.selection.target - job.selection.qualified, options);
-          job.selection.checked += ids.length; job.selection.excluded += ids.length - saved.filter(firm => qualifiesForProspecting(firm, options)).length;
+        if (selection) {
+          selection.qualified += await addProspects(job.id, saved, selection.target - selection.qualified, options);
+          selection.checked += ids.length; selection.excluded += ids.length - saved.filter(firm => qualifiesForProspecting(firm, options)).length;
         }
         job.pending = job.pending.slice(ids.length); job.processed += ids.length; job.saved += saved.length; job.skipped += ids.length - saved.length;
         job.withWebsite += saved.filter(f => f.website).length; job.withEmail += saved.filter(f => f.email).length; job.withPhone += saved.filter(f => f.phone).length;
         job.retries = 0; job.message = ''; job.nextRunAt = 0;
         if (!job.pending.length) { if (job.nextPage === null) job.state = 'complete'; else job.page = job.nextPage; }
-        if (job.selection) {
-          if (job.selection.qualified >= job.selection.target) { job.state = 'complete'; job.selection.stopReason = 'target'; job.message = 'Zebrano docelową kolejkę firm. Pobieranie zakończone.'; }
-          else if (job.selection.checked >= job.selection.maxChecks) { job.state = 'complete'; job.selection.stopReason = 'budget'; job.message = 'Osiągnięto limit sprawdzanych wpisów. Kolejka zawiera tylko znalezione dopasowania; nie osiągnięto celu.'; }
-          else if (job.state === 'complete') { job.selection.stopReason = 'exhausted'; job.message = 'Przejrzano dostępną listę CEIDG. Zebrano tylko znalezione dopasowania.'; }
+        if (selection) {
+          if (selection.qualified >= selection.target) { job.state = 'complete'; selection.stopReason = 'target'; job.message = 'Zebrano docelową kolejkę firm. Pobieranie zakończone.'; }
+          else if (selection.checked >= selection.maxChecks) { job.state = 'complete'; selection.stopReason = 'budget'; job.message = 'Osiągnięto limit sprawdzanych wpisów. Kolejka zawiera tylko znalezione dopasowania; nie osiągnięto celu.'; }
+          else if (job.state === 'complete') { selection.stopReason = 'exhausted'; job.message = 'Przejrzano dostępną listę CEIDG. Zebrano tylko znalezione dopasowania.'; }
+          if (job.state === 'complete' && job.yearly) advanceYear(job, selection.stopReason!);
         }
         const writes = [saveStatement(job)];
         if (job.state === 'complete') writes.push({ sql: 'INSERT INTO imports(source,count,createdAt) VALUES (?,?,?)', args: ['CEIDG — import automatyczny', job.saved, new Date().toISOString()] });

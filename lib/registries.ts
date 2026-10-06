@@ -59,9 +59,11 @@ async function ceidgRequest(url: URL) {
   try { await reserveCeidgRequest(); } catch (error) { throw new RegistryError((error as Error).message, 429, error instanceof CeidgRateLimitError ? String(error.retryAfter) : '4'); }
   return getJson(url, token);
 }
-export async function ceidgActivePage(page: number) {
+export async function ceidgActivePage(page: number, dates: { minStartedAt?: string; maxStartedAt?: string } = {}) {
   const url = new URL('https://dane.biznes.gov.pl/api/ceidg/v3/firmy');
   url.searchParams.set('status', 'AKTYWNY'); url.searchParams.set('limit', '25'); url.searchParams.set('page', String(page));
+  if (dates.minStartedAt) url.searchParams.set('dataod', dates.minStartedAt);
+  if (dates.maxStartedAt) url.searchParams.set('datado', dates.maxStartedAt);
   const response = await ceidgRequest(url);
   if (!response) return { ids: [], total: 0, nextPage: null };
   const data = obj(response);
@@ -72,7 +74,7 @@ export async function ceidgActivePage(page: number) {
   let nextPage: number | null = null;
   if (typeof links.next === 'string' && links.next) {
     const next = new URL(links.next);
-    if (next.origin !== url.origin || next.pathname !== url.pathname || next.searchParams.get('status') !== 'AKTYWNY' || next.searchParams.get('dataod') || next.searchParams.get('datado')) throw new RegistryError('Nieprawidłowy odsyłacz kolejnej strony CEIDG.');
+    if (next.origin !== url.origin || next.pathname !== url.pathname || next.searchParams.get('status') !== 'AKTYWNY' || ['dataod', 'datado'].some(key => next.searchParams.has(key) && next.searchParams.get(key) !== url.searchParams.get(key))) throw new RegistryError('Nieprawidłowy odsyłacz kolejnej strony CEIDG.');
     const number = Number(next.searchParams.get('page'));
     if (Number.isSafeInteger(number) && number > page) nextPage = number;
   }
