@@ -53,7 +53,7 @@ Nowe wpisy bez dopasowania nie są zapisywane. Kolejka deduplikuje firmy po iden
 Analiza v2 pokazuje sektor, dopasowanie punktowe, składniki oceny, propozycję usługi, możliwą korzyść i pytania do rozpoznania. Punkty opisują dopasowanie do oferty, nie prawdopodobieństwo zakupu; reguły opierają się wyłącznie na rejestrze. Nie wykonują audytu WWW, nie weryfikują kont marketplace ani nie dopowiadają zainteresowania.
 
 ## Wspólna praca i oznaczenia
-Pole Pracuję jako zapamiętuje deklarowane imię wyłącznie w danej przeglądarce. Nie tworzy konta ani uprawnień: zespół nadal używa wspólnego logowania. Przejmij kontakt zapisuje osobę odpowiedzialną we wspólnej bazie. Filtr osoby obejmuje wszystkie osoby, nieprzypisane i konkretną osobę. Telefon jest widoczny, ale link Zadzwoń jest dostępny wyłącznie, gdy zapisane przypisanie odpowiada imieniu w tej przeglądarce. To organizacja pracy, nie techniczna blokada połączeń wykonywanych ręcznie. Przekazanie firmy innej osobie odbywa się przez zmianę osoby odpowiedzialnej i zapisanie, po uzgodnieniu z zespołem.
+Imię w nagłówku pochodzi z zalogowanego konta. Przejmij kontakt zapisuje osobę połączoną z kontem. Listę osób utrzymuje administrator w panelu Zespół i dostęp. Link Zadzwoń jest dostępny dla osoby prowadzącej firmę; telefonu widocznego w rejestrze nie blokujemy poza aplikacją. Przekazanie firmy wykonuje administrator.
 
 Oznaczenia można dodawać, edytować i usuwać przy firmie, a następnie filtrować po dokładnym oznaczeniu. Zmiana nazwy dotyczy tej firmy, nie zmienia oznaczeń w całej bazie. Oznaczenia i przypisania zachowują się przy ponownym imporcie. Filtry łączą się z PKD, statusem, wyszukiwaniem i kontaktami oraz obejmują całą bazę przed paginacją.
 
@@ -66,3 +66,19 @@ Na Vercel ustaw OPENAI_API_KEY jako sekret (wyłącznie Production), CRM_AI_ENAB
 Limit 50 dotyczy całego zespołu na dobę UTC i obejmuje próby zakończone błędem. Rezerwacja limitu jest transakcyjna. Wielokrotne kliknięcie nie tworzy drugiego zadania. Gotowy raport jest otwierany z bazy bez nowego żądania; jego płatne odświeżenie jest osobnym potwierdzanym działaniem. Zawieszone zadanie po 10 minutach wymaga sprawdzenia Workflow przed ponowieniem; nie ponawiamy automatycznie płatnego wywołania. Limitu liczby analiz nie należy traktować jako ścisłego limitu dolarowego.
 
 Publiczny profil wysyłany do OpenAI obejmuje nazwę firmy, NIP, miasto, PKD i WWW. Nie obejmuje notatek CRM, przypisania pracownika, oznaczeń, e-maila ani telefonu. Parametr store:false ogranicza przechowywanie odpowiedzi API; obowiązują zasady retencji OpenAI. Raport pokazuje szacunkowy koszt na podstawie użycia tokenów i wyszukiwania; ostateczne koszty sprawdzaj w https://platform.openai.com/usage, saldo i doładowania w https://platform.openai.com/settings/organization/billing/overview.
+
+## Konta i panel administratora
+
+Login głównego administratora: admin. Hasło pozostaje w CRM_PASSWORD w Vercel; nie wpisuj sekretów do repozytorium. Dotychczasowa sesja administratora działa do jej wygaśnięcia. Panel „Zespół i dostęp” dodaje i edytuje osoby odpowiedzialne oraz konta z własnym loginem i hasłem (minimum 12 znaków). Nie tworzymy przykładowych osób; migracja zachowuje rzeczywiste dotychczasowe przypisania.
+
+Każde konto może być powiązane z osobą odpowiedzialną. Imię w nagłówku i możliwość przejęcia kontaktu wynikają z sesji, a nie z wyboru w przeglądarce. Zwykły użytkownik nie może edytować firmy przypisanej do innej osoby ani zarządzać zespołem. Administrator może przekazywać firmy. Wyłączenie osoby zachowuje historię i blokuje nowe przypisania. Zmiana jej nazwy aktualizuje firmy i ich wersje, aby chronić przed nadpisaniem starego formularza.
+
+Hasła kont są przechowywane jako scrypt z losową solą (N=131072,r=8,p=1). Sesje zawierają identyfikator i wersję konta; zablokowanie konta, zmiana hasła lub roli unieważnia stare sesje. API sprawdza aktywność i role przy każdym żądaniu. Panel nie zwraca skrótów haseł.
+
+## Gemini — bezpłatny pilotaż
+
+Na Vercel wybierz CRM_AI_PROVIDER=gemini, dodaj GEMINI_API_KEY z projektu Google AI Studio z planem Free tier BEZ Cloud Billing, a dopiero po sprawdzeniu planu ustaw CRM_GEMINI_FREE_TIER_CONFIRMED=true i CRM_AI_ENABLED=true. Zmienna potwierdzenia jest deklaracją administratora; API generacji nie potwierdza stanu rozliczeń. Włączenie płatnego planu w Google może powodować opłaty również dla tego klucza. CRM nie włącza rozliczeń, nie zmienia modelu automatycznie i nie korzysta z OpenAI po wybraniu Gemini.
+
+Model gemini-3.8-flash korzysta z URL Context tylko dla WWW podanego w rejestrze. Nie korzysta z Google Search. Gdy WWW brakuje lub pobranie nie powiedzie się, raport zawiera wyłącznie hipotezy z rejestru, bez fikcyjnego audytu strony. Potencjał marketplace wymaga danych o asortymencie; brak źródeł oznacza brak danych. Wykorzystane źródła pochodzą wyłącznie z udanego pobrania dokładnie podanego URL. Limity konta Google sprawdzaj w AI Studio; 50 w CRM jest górnym limitem zespołu, a nie gwarantowaną liczbą analiz Google. Limit dzienny, odstęp minimum 12 sekund, zapis raportu i brak automatycznych ponowień ograniczają zużycie.
+
+Dokumentacja: https://ai.google.dev/gemini-api/docs/pricing, https://ai.google.dev/gemini-api/docs/generate-content/url-context, https://ai.google.dev/gemini-api/docs/generate-content/structured-output, https://ai.google.dev/api/generate-content, https://ai.google.dev/gemini-api/docs/billing. Wysyłamy tylko publiczny profil firmy opisany wyżej, bez notatek, kontaktów czy oznaczeń. store:false ogranicza logowanie żądania; obowiązują warunki Google.
