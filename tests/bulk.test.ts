@@ -21,7 +21,7 @@ test('Cloud import checkpoints, retries, leases, pause during API response, resu
     await releaseWorker('one'); assert.equal(await acquireWorker('two'), true); await releaseWorker('two');
     assert.equal(retryDelay('60'), 60000);
     const existing = (await upsertRegistry([normalizeCeidg(fixture('active-1'))], 'CEIDG'))[0];
-    await updateCrm(existing.id, { note: 'Preserve CRM', status: 'Do kontaktu' });
+    await updateCrm(existing.id, { crmRevision: existing.crmRevision || '0', note: 'Preserve CRM', status: 'Do kontaktu' });
     const job = await controlBulk('start');
     await assert.rejects(controlBulk('start'), /istnieje/);
     globalThis.fetch = async url => {

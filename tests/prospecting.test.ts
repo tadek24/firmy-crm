@@ -18,7 +18,7 @@ test('Contact filters combine with paging; focused import preserves cursor, excl
   try {
     const fixtures = [entry('service', { email: 's@example.org' }), entry('trade', { telefon: '123', pkdGlowny: { kod: '47.71.Z', nazwa: 'Odzież' } }), entry('missing'), entry('production', { email: 'p@example.org', pkdGlowny: { kod: '14.12.Z', nazwa: 'Produkcja odzieży' } }), entry('has-web', { www: 'example.org', email: 'w@example.org' }), entry('blocked', { telefon: '456' }), entry('web-only', { www: 'example.org' }), entry('empty', { www: '', telefon: '', email: '' })];
     const saved = await upsertRegistry(fixtures.map(normalizeCeidg), 'CEIDG');
-    await updateCrm(saved[5].id, { status: 'Nie kontaktować', note: 'Preserve exclusion' });
+    await updateCrm(saved[5].id, { crmRevision: saved[5].crmRevision || '0', status: 'Nie kontaktować', note: 'Preserve exclusion' });
     const counts = { direct: 5, email: 3, phone: 2, website: 2, any: 6, none: 2 };
     for (const [filter, count] of Object.entries(counts)) assert.equal((await companyPage('', 'Wszystkie', 'Wszystkie', 0, filter)).total, count);
     assert.equal(parseContactFilter("email' OR 1=1"), 'all');
