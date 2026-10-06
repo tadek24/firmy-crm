@@ -36,7 +36,7 @@ test('Turso HTTP protocol: authenticated queries, transaction rollback, contacts
     assert.equal((await companyPage()).total, 0);
     const fixture = normalizeCeidg({ id: 'firm-one', nazwa: 'Łódź', status: 'AKTYWNY', wlasciciel: { nip: '1234567890' }, www: 'example.org', email: 'a@example.org', telefon: '123456789' });
     const saved = (await upsertRegistry([fixture], 'CEIDG'))[0];
-    await updateCrm(saved.id, { note: 'Keep note', status: 'Do kontaktu', tags: ['Łódź'] });
+    await updateCrm(saved.id, { crmRevision: saved.crmRevision || '0', note: 'Keep note', status: 'Do kontaktu', tags: ['Łódź'] });
     await upsertRegistry([{ ...fixture, name: 'Changed' }], 'CEIDG');
     const page = await companyPage('łódź');
     assert.equal(page.total, 1); assert.equal(page.companies[0].note, 'Keep note');
