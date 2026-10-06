@@ -16,7 +16,7 @@ test('AI source validation removes unsupported facts and marks unsupported oppor
   const result = readReport(responseData());
   assert.equal(result.website.findings.length,1); assert.equal(result.website.improvements[0].basis,'hipoteza');
   assert.equal(result.marketplaces[0].potential,'brak danych'); assert.equal(result.searchCalls,1);
-  assert.ok(Math.abs(result.estimatedUsd-0.0265)<1e-10);
+  assert.ok(Math.abs((result.estimatedUsd || 0)-0.0265)<1e-10);
   assert.equal(publicUrl('http://127.0.0.1/test'),''); assert.equal(publicUrl('https://user:password@firma.example'),'');
   assert.throws(() => readReport({status:'incomplete'}));
   assert.throws(() => readReport({...responseData(),output:responseData().output.slice(1)}),/źródeł/);

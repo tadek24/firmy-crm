@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { batch, query, transaction, type Statement } from './database';
 import type { Company } from './types';
+import type { CurrentUser } from './team';
+import { RegistryError } from './registries';
 import { analyzeCompany, ANALYSIS_VERSION } from './analysis';
 import { parseContactFilter } from './contact-filters';
 import { qualifiesForProspecting } from './prospecting';
@@ -142,7 +144,7 @@ export async function upsertRegistry(items: RegistryCompany[], source: string, m
   return manageTransaction ? transaction(write) : write();
 }
 export class CrmConflictError extends Error {}
-export async function updateCrm(id: string, patch: unknown): Promise<Company> {
+export async function updateCrm(id: string, patch: unknown, actor?: CurrentUser): Promise<Company> {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Nieprawidłowe dane CRM.');
   const data = patch as Record<string, unknown>;
   if (Object.keys(data).some(key => !['status','tags','note','assignee','crmRevision'].includes(key))) throw new Error('Możesz zmieniać tylko status, osobę odpowiedzialną, etykiety i notatkę.');
@@ -156,6 +158,15 @@ export async function updateCrm(id: string, patch: unknown): Promise<Company> {
     const row = (await query('SELECT * FROM companies WHERE id=?', [id])).rows[0] as Row | undefined;
     if (!row) throw new Error('Firma nie istnieje.');
     const previous = JSON.parse(row.crm);
+    if (actor) {
+      const nextOwner = 'assignee' in data ? String(data.assignee).trim() : String(previous.assignee || '');
+      if (nextOwner !== String(previous.assignee || '') && nextOwner && !(await query('SELECT 1 FROM crm_people WHERE name=? AND active=1', [nextOwner])).rows.length) throw new RegistryError('Wybierz aktywną osobę z listy zespołu.', 400);
+      if (actor.role !== 'admin') {
+        if (previous.assignee && previous.assignee !== actor.person) throw new RegistryError('Tę firmę prowadzi inna osoba. Administrator może przekazać kontakt.', 403);
+        if (nextOwner && nextOwner !== actor.person) throw new RegistryError('Możesz przypisać firmę do siebie. Przekazanie kontaktu wykonuje administrator.', 403);
+        if ('status' in data && data.status !== previous.status && !nextOwner) throw new RegistryError('Przed zmianą statusu przypisz firmę do siebie.', 403);
+      }
+    }
     if (data.crmRevision !== (previous.crmRevision || '0')) throw new CrmConflictError('Ktoś zmienił tę firmę. Wczytaj aktualne dane przed ponownym zapisem; Twój szkic nie został zapisany.');
     const crm = { ...previous, ...data, crmRevision: randomUUID(), crmUpdatedAt: new Date().toISOString() };
     if (data.status === 'Kontakt wykonany' && previous.status !== 'Kontakt wykonany') crm.lastContact = crm.crmUpdatedAt;
