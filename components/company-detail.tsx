@@ -48,7 +48,7 @@ export function CompanyDetail({ company, person, people, admin, busy, launchToke
       <p className="muted small">Osoba, status i oznaczenia są wspólne dla zespołu po zapisaniu. Oznaczenia edytujesz przy tej firmie.</p>
       {company.lastContact && <p className="muted small">Kontakt oznaczony jako wykonany: {new Date(company.lastContact).toLocaleString('pl-PL')}</p>}
     </form>
-    <dl>{[['NIP', company.nip], ['REGON', company.regon], ['KRS', company.krs], ['Miasto', company.city], ['Stan w rejestrze', company.registryStatus], ['PKD', company.pkdMain], ['Wersja PKD', company.pkdYear], ['Telefon', company.phone], ['E-mail', company.email]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || '—'}</dd></div>)}</dl>
+    <dl>{[['NIP', company.nip], ['REGON', company.regon], ['KRS', company.krs], ['Data rozpoczęcia', company.startedAt ? new Date(company.startedAt).toLocaleDateString('pl-PL') : undefined], ['Miasto', company.city], ['Stan w rejestrze', company.registryStatus], ['PKD', company.pkdMain], ['Wersja PKD', company.pkdYear], ['Telefon', company.phone], ['E-mail', company.email]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || '—'}</dd></div>)}</dl>
     {company.pkdName && <p className="muted small">{company.pkdName}</p>}
     <div className="contact-links">{company.phone && (canCall(company,person) ? <a href={`tel:${company.phone.replace(/[^+\d]/g, '')}`}>Zadzwoń <ArrowUpRight size={14}/></a> : <span className="muted small">Telefon dostępny po zapisaniu przypisania do osoby połączonej z Twoim kontem.</span>)}{company.website && <a href={company.website} target="_blank" rel="noreferrer">Strona WWW <ArrowUpRight size={14}/></a>}</div>
     <AiAnalysis companyId={company.id} launchToken={launchToken}/>
