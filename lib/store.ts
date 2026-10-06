@@ -6,7 +6,7 @@ import { parseContactFilter } from './contact-filters';
 import { qualifiesForProspecting } from './prospecting';
 const contactPresent = (field: 'email' | 'phone' | 'website') => `(trim(coalesce(json_extract(registry,'$.${field}'),''))!='')`;
 export const statuses = ['Nowy', 'Do sprawdzenia', 'Do kontaktu', 'Kontakt wykonany', 'Zainteresowany', 'Oferta wysłana', 'Negocjacje', 'Klient', 'Nie zainteresowany', 'Nie kontaktować'] as const;
-export type RegistryCompany = Omit<Company, 'status' | 'tags' | 'note' | 'online' | 'lastContact' | 'assignee' | 'crmRevision' | 'crmUpdatedAt'>;
+export type RegistryCompany = Omit<Company, 'status' | 'tags' | 'note' | 'online' | 'lastContact' | 'assignee' | 'crmRevision' | 'crmUpdatedAt' | 'aiState'>;
 let ready: Promise<void> | undefined;
 export function setup() {
   if (!ready) ready = initialize().catch(error => { ready = undefined; throw error; });
@@ -30,6 +30,9 @@ async function initialize() {
     'CREATE TABLE IF NOT EXISTS worker_lease (id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, expiresAt INTEGER NOT NULL)',
     'CREATE TABLE IF NOT EXISTS bulk_seen (jobId TEXT NOT NULL, registryId TEXT NOT NULL, PRIMARY KEY(jobId,registryId))',
     'CREATE TABLE IF NOT EXISTS prospect_members (jobId TEXT NOT NULL, companyId TEXT NOT NULL, PRIMARY KEY(jobId,companyId))',
+    'CREATE TABLE IF NOT EXISTS ai_jobs (companyId TEXT PRIMARY KEY, taskId TEXT NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS ai_requests (id TEXT PRIMARY KEY, createdAt TEXT NOT NULL)',
+    'CREATE INDEX IF NOT EXISTS ai_requests_date ON ai_requests(createdAt)',
     'CREATE TABLE IF NOT EXISTS auth_attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expiresAt INTEGER NOT NULL)',
   ];
   const flags = (prefix: string) => ({ toContact: `(json_extract(${prefix}.crm,'$.status')='Do kontaktu')`, active: `(json_extract(${prefix}.crm,'$.status') IN ('Zainteresowany','Oferta wysłana','Negocjacje'))`, website: `(coalesce(json_extract(${prefix}.registry,'$.website'),'')!='')`, email: `(coalesce(json_extract(${prefix}.registry,'$.email'),'')!='')`, phone: `(coalesce(json_extract(${prefix}.registry,'$.phone'),'')!='')` });
@@ -49,6 +52,7 @@ function unpack(row: Row): Company {
   return company;
 }
 export async function listCompanies() { await setup(); return ((await query('SELECT * FROM companies ORDER BY rowid DESC')).rows as Row[]).map(unpack); }
+export async function getCompany(id: string) { await setup(); const row = (await query('SELECT * FROM companies WHERE id=?',[id])).rows[0] as Row | undefined; return row ? unpack(row) : null; }
 export async function companyPage(search = '', status = 'Wszystkie', category = 'Wszystkie', page = 0, contact = 'all', scope = 'all', owner = '', tag = '') {
   await setup(); const clauses: string[] = [], parameters: string[] = [];
   if (search.trim()) {
@@ -74,7 +78,7 @@ export async function companyPage(search = '', status = 'Wszystkie', category = 
   const stats = summary[0].rows[0]; const total = Number(where ? summary[2].rows[0].n : stats.total);
   const currentPage = Math.min(Math.max(0, page), Math.max(0, Math.ceil(total / 100) - 1));
   const order = scope === 'prospects' ? "coalesce(json_extract(registry,'$.analysis.fitScore'),0) DESC,rowid DESC" : 'rowid DESC';
-  const companies = ((await query(`SELECT * FROM companies${where} ORDER BY ${order} LIMIT 100 OFFSET ?`, [...parameters, currentPage * 100])).rows as Row[]).map(unpack);
+  const companies = ((await query(`SELECT *, (SELECT state FROM ai_jobs WHERE companyId=companies.id) AS aiState FROM companies${where} ORDER BY ${order} LIMIT 100 OFFSET ?`, [...parameters, currentPage * 100])).rows as (Row & {aiState: Company['aiState']})[]).map(row => ({...unpack(row),aiState:row.aiState || undefined}));
   const labels = await batch([
     { sql: "SELECT DISTINCT json_extract(crm,'$.assignee') AS name FROM companies WHERE trim(coalesce(json_extract(crm,'$.assignee'),''))!='' ORDER BY name" },
     { sql: "SELECT DISTINCT value AS name FROM companies,json_each(companies.crm,'$.tags') ORDER BY name" },

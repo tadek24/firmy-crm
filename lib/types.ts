@@ -46,6 +46,7 @@ export type Company = {
   assignee?: string;
   crmRevision?: string;
   crmUpdatedAt?: string;
+  aiState?: 'queued' | 'running' | 'completed' | 'failed';
   tags: string[];
   online: string[];
   lastContact?: string;
