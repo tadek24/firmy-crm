@@ -47,7 +47,7 @@ export function AiAnalysis({ companyId, launchToken = 0 }: { companyId: string; 
     {data && !report && <button className="primary" disabled={busy || pending || !data.configured || data.used >= data.dailyLimit} onClick={() => void run(false)}>{busy ? 'Uruchamianie…' : task?.state === 'failed' ? (gemini ? 'Ponów analizę Gemini' : 'Ponów analizę AI (płatne)') : 'Analizuj AI'}</button>}
     {report && <>
       <p className="ai-summary">{report.summary}</p>
-      <p className="muted small">Sprawdzono: {new Date(report.checkedAt).toLocaleString('pl-PL')} · {report.model} · {report.provider === 'gemini' ? 'Gemini — bez opłat za API w projekcie Free tier; limity w Google AI Studio.' : `szacunkowy koszt ${(report.estimatedUsd || 0).toFixed(4)}. Rzeczywiste rozliczenie w OpenAI Usage.`}</p>
+      <p className="muted small">Sprawdzono: {new Date(report.checkedAt).toLocaleString('pl-PL')} · {report.model} · {report.provider === 'gemini' ? 'Gemini — bez opłat za API w projekcie Free tier; limity w Google AI Studio.' : `szacunkowy koszt ${(report.estimatedUsd || 0).toFixed(4)} USD. Rzeczywiste rozliczenie w OpenAI Usage.`}</p>
       <h4>Strona internetowa — {report.website.identity}</h4><p>{report.website.evidence}</p>
       {report.website.url && <a href={report.website.url} target="_blank" rel="noreferrer">Sprawdzona strona ↗</a>}
       {report.website.findings.length > 0 && <ul>{report.website.findings.map((item,i) => <li key={i}>{item.statement} <a href={item.sourceUrl} target="_blank" rel="noreferrer">Źródło ↗</a></li>)}</ul>}
