@@ -47,12 +47,12 @@ export function CrmApp() {
   const [categories, setCategories] = useState<string[]>([]);
   const [stats, setStats] = useState({ total: 0, toContact: 0, active: 0, website: 0, email: 0, phone: 0 });
   const listUrl = `/api/companies?${new URLSearchParams({ q: query, status, category, contact, scope, owner, tag: tagFilter, page: String(page) })}`;
-  async function load() { const data = await api(listUrl); setCompanies(data.companies); setImports(data.imports); setConfigured(data.ceidgConfigured); setAiConfigured(data.aiConfigured); setTotal(data.total); setCategories(data.categories); setStats(data.stats); setAssignees(data.assignees || []); setTagOptions(data.tags || []); setUser(data.user); setDirectory(data.people || []); setUser(data.user); setDirectory(data.people || []); }
+  async function load() { const data = await api(listUrl); setCompanies(data.companies); setImports(data.imports); setConfigured(data.ceidgConfigured); setAiConfigured(data.aiConfigured); setTotal(data.total); setCategories(data.categories); setStats(data.stats); setAssignees(data.assignees || []); setTagOptions(data.tags || []); setUser(data.user); setDirectory(data.people || []); }
   useEffect(() => { let cancelled = false;
     window.localStorage.removeItem('firmy-crm-demo-v1'); window.localStorage.removeItem('firmy-crm-person');
     async function refresh() {
       try { const data = await api(listUrl);
-        if (!cancelled) { setCompanies(data.companies); setImports(data.imports); setConfigured(data.ceidgConfigured); setAiConfigured(data.aiConfigured); setTotal(data.total); setCategories(data.categories); setStats(data.stats); setAssignees(data.assignees || []); setTagOptions(data.tags || []); }
+        if (!cancelled) { setCompanies(data.companies); setImports(data.imports); setConfigured(data.ceidgConfigured); setAiConfigured(data.aiConfigured); setTotal(data.total); setCategories(data.categories); setStats(data.stats); setAssignees(data.assignees || []); setTagOptions(data.tags || []); setUser(data.user); setDirectory(data.people || []); }
       } catch (error) { if (!cancelled) setError((error as Error).message); }
       finally { if (!cancelled) setLoading(false); }
     }
