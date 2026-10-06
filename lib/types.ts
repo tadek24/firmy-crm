@@ -27,6 +27,7 @@ export type Company = {
   registryId: string;
   registryStatus?: string;
   syncedAt?: string;
+  startedAt?: string;
   pkdYear?: string;
   name: string;
   source: "CEIDG" | "KRS";
