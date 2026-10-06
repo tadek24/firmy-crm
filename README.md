@@ -51,3 +51,12 @@ Selekcja zastępuje szeroki import: aktywne CEIDG, główna działalność usłu
 Nowe wpisy bez dopasowania nie są zapisywane. Kolejka deduplikuje firmy po identyfikatorze CRM; ręczne notatki i status pozostają zachowane. Statusy Klient, Nie zainteresowany i Nie kontaktować wykluczają firmę z kolejki. Widok Kolejka dopasowanych firm pokazuje tylko członków aktualnej selekcji, posortowanych według dopasowania. Wszystkie zapisane firmy pozostają dostępne w drugim widoku.
 
 Analiza v2 pokazuje sektor, dopasowanie punktowe, składniki oceny, propozycję usługi, możliwą korzyść i pytania do rozpoznania. Punkty opisują dopasowanie do oferty, nie prawdopodobieństwo zakupu; reguły opierają się wyłącznie na rejestrze. Nie wykonują audytu WWW, nie weryfikują kont marketplace ani nie dopowiadają zainteresowania.
+
+## Wspólna praca i oznaczenia
+Pole Pracuję jako zapamiętuje deklarowane imię wyłącznie w danej przeglądarce. Nie tworzy konta ani uprawnień: zespół nadal używa wspólnego logowania. Przejmij kontakt zapisuje osobę odpowiedzialną we wspólnej bazie. Filtr osoby obejmuje wszystkie osoby, nieprzypisane i konkretną osobę. Telefon jest widoczny, ale link Zadzwoń jest dostępny wyłącznie, gdy zapisane przypisanie odpowiada imieniu w tej przeglądarce. To organizacja pracy, nie techniczna blokada połączeń wykonywanych ręcznie. Przekazanie firmy innej osobie odbywa się przez zmianę osoby odpowiedzialnej i zapisanie, po uzgodnieniu z zespołem.
+
+Oznaczenia można dodawać, edytować i usuwać przy firmie, a następnie filtrować po dokładnym oznaczeniu. Zmiana nazwy dotyczy tej firmy, nie zmienia oznaczeń w całej bazie. Oznaczenia i przypisania zachowują się przy ponownym imporcie. Filtry łączą się z PKD, statusem, wyszukiwaniem i kontaktami oraz obejmują całą bazę przed paginacją.
+
+Każdy zapis CRM wymaga crmRevision z odczytanej firmy. Porównanie i zapis odbywają się w jednej transakcji; nieaktualna wersja otrzymuje HTTP 409 i nie nadpisuje danych. Po konflikcie użytkownik zachowuje szkic i może wczytać aktualne dane, świadomie zastępując szkic. Starsze otwarte wersje interfejsu muszą odświeżyć stronę. Zmiana statusu na Kontakt wykonany zapisuje datę oznaczenia kontaktu; aplikacja nie wykrywa faktycznego połączenia. Lista odświeża się co 10 sekund.
+
+Integracja AI nie jest włączona. Kolejny etap może wykorzystać OpenAI Responses API z wyszukiwaniem publicznych źródeł, cytowaniem ustaleń i osobnym budżetem. Bez dodatkowych źródeł wynik AI nadal jest hipotezą opartą na CEIDG. Klucz należy przechowywać na Vercel, nigdy w przeglądarce ani repozytorium.
