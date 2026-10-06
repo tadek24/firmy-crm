@@ -53,5 +53,10 @@ test('Contact filters combine with paging; focused import preserves cursor, excl
     assert.equal((await companyPage('batch', 'Wszystkie', 'Wszystkie', 0, 'email')).companies.length, 100);
     assert.equal((await companyPage('batch', 'Wszystkie', 'Wszystkie', 1, 'email')).companies.length, 5);
     assert.equal((await companyPage('batch', 'Wszystkie', 'Wszystkie', 0, 'phone')).total, 0);
+    await upsertRegistry([normalizeCeidg(entry('started-old', { dataRozpoczecia: '2001-03-04' })), normalizeCeidg(entry('started-new', { dataRozpoczecia: '2024-08-09' }))], 'CEIDG');
+    const oldest = await companyPage('started-', 'Wszystkie', 'Wszystkie', 0, 'all', 'all', '', '', 'startedAsc');
+    const newest = await companyPage('started-', 'Wszystkie', 'Wszystkie', 0, 'all', 'all', '', '', 'startedDesc');
+    assert.equal(oldest.companies[0].registryId, 'started-old');
+    assert.equal(newest.companies[0].registryId, 'started-new');
   } finally { globalThis.fetch = originalFetch; closeTestDatabase(); rmSync(directory, { recursive: true, force: true }); }
 });
