@@ -4,11 +4,12 @@ import { ArrowUpRight, X } from 'lucide-react';
 import type { Company, LeadStatus } from '@/lib/types';
 import { canCall } from '@/lib/team';
 import { AnalysisDetail } from './lead-analysis';
+import { AiAnalysis } from './ai-analysis';
 
 const statuses: LeadStatus[] = ['Nowy', 'Do sprawdzenia', 'Do kontaktu', 'Kontakt wykonany', 'Zainteresowany', 'Oferta wysłana', 'Negocjacje', 'Klient', 'Nie zainteresowany', 'Nie kontaktować'];
-type Props = { company: Company; person: string; busy: boolean; onClose: () => void; onUpdate: (patch: Partial<Company>) => Promise<Company> };
+type Props = { company: Company; person: string; busy: boolean; launchToken?: number; onClose: () => void; onUpdate: (patch: Partial<Company>) => Promise<Company> };
 
-export function CompanyDetail({ company, person, busy, onClose, onUpdate }: Props) {
+export function CompanyDetail({ company, person, busy, launchToken, onClose, onUpdate }: Props) {
   const [draft, setDraft] = useState(() => ({ note: company.note || '', status: company.status, tags: company.tags, assignee: company.assignee || '', crmRevision: company.crmRevision || '0' }));
   const [tag, setTag] = useState('');
   const [editingTag, setEditingTag] = useState<string | null>(null);
@@ -49,6 +50,7 @@ export function CompanyDetail({ company, person, busy, onClose, onUpdate }: Prop
     <dl>{[['NIP', company.nip], ['REGON', company.regon], ['KRS', company.krs], ['Miasto', company.city], ['Stan w rejestrze', company.registryStatus], ['PKD', company.pkdMain], ['Wersja PKD', company.pkdYear], ['Telefon', company.phone], ['E-mail', company.email]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || '—'}</dd></div>)}</dl>
     {company.pkdName && <p className="muted small">{company.pkdName}</p>}
     <div className="contact-links">{company.phone && (canCall(company,person) ? <a href={`tel:${company.phone.replace(/[^+\d]/g, '')}`}>Zadzwoń <ArrowUpRight size={14}/></a> : <span className="muted small">Telefon dostępny po zapisaniu przypisania do osoby wskazanej w „Pracuję jako”.</span>)}{company.website && <a href={company.website} target="_blank" rel="noreferrer">Strona WWW <ArrowUpRight size={14}/></a>}</div>
+    <AiAnalysis companyId={company.id} launchToken={launchToken}/>
     <AnalysisDetail company={company}/>
     <p className="muted small">Pobrano: {company.syncedAt ? new Date(company.syncedAt).toLocaleString('pl-PL') : '—'}</p>
   </aside>;
