@@ -32,7 +32,7 @@ test('Gemini requires free-tier confirmation, throttles shared requests and neve
     globalThis.fetch=async(endpoint,options)=>{
       calls++; assert.match(String(endpoint),/^https:\/\/generativelanguage\.googleapis\.com\//); assert.ok(!String(endpoint).includes('test-key'));
       assert.equal((options?.headers as Record<string,string>)['x-goog-api-key'],'test-key');
-      const body=JSON.parse(String(options?.body)); assert.equal(body.store,false); assert.ok(!JSON.stringify(body).includes('google_search'));
+      const body=JSON.parse(String(options?.body)); assert.equal(body.store,false); assert.equal(body.generationConfig.responseFormat.text.mimeType,'APPLICATION_JSON'); assert.ok(!JSON.stringify(body).includes('google_search'));
       return Response.json(data());
     };
     const job=await requestAnalysis(company.id); await performAnalysis(company.id,job.task.taskId); await performAnalysis(company.id,job.task.taskId);
