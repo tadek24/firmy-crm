@@ -4,6 +4,16 @@ import { reserveCeidgRequest, CeidgRateLimitError, type RegistryCompany } from '
 type Obj = Record<string, unknown>;
 const obj = (value: unknown): Obj => value && typeof value === 'object' && !Array.isArray(value) ? value as Obj : {};
 const str = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+function dateOnly(value: unknown) {
+  const text = str(value);
+  if (!text) return undefined;
+  const european = text.match(/^(\d{2})[./-](\d{2})[./-](\d{4})$/);
+  if (european) return `${european[3]}-${european[2]}-${european[1]}`;
+  const iso = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  const parsed = Date.parse(text);
+  return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString().slice(0, 10);
+}
 function required(value: unknown, field: string) { const text = str(value); if (!text) throw new Error(`Niepełna odpowiedź rejestru: ${field}.`); return text; }
 export function safeWebsite(value: unknown) {
   const text = str(value); if (!text) return undefined;
@@ -12,7 +22,7 @@ export function safeWebsite(value: unknown) {
 export function normalizeCeidg(value: unknown): RegistryCompany {
   const entry = obj(value), owner = obj(entry.wlasciciel), address = obj(entry.adresDzialalnosci), pkd = obj(entry.pkdGlowny);
   const registryId = required(entry.id, 'id');
-  return { id: `CEIDG:${registryId}`, registryId, source: 'CEIDG', name: required(entry.nazwa, 'nazwa'), nip: str(owner.nip), regon: str(owner.regon) || undefined, city: str(address.miasto), voivodeship: str(address.wojewodztwo), pkdMain: str(pkd.kod), pkdName: str(pkd.nazwa), pkdYear: str(entry.rokPkd), category: categorizePkd(str(pkd.kod)), phone: str(entry.telefon) || undefined, email: str(entry.email) || undefined, website: safeWebsite(entry.www), registryStatus: str(entry.status), syncedAt: new Date().toISOString() };
+  return { id: `CEIDG:${registryId}`, registryId, source: 'CEIDG', name: required(entry.nazwa, 'nazwa'), nip: str(owner.nip), regon: str(owner.regon) || undefined, startedAt: dateOnly(entry.dataRozpoczecia ?? entry.dataRozpoczeciaDzialalnosci ?? entry.dataRozpoczeciaWykonywaniaDzialalnosci ?? owner.dataRozpoczecia), city: str(address.miasto), voivodeship: str(address.wojewodztwo), pkdMain: str(pkd.kod), pkdName: str(pkd.nazwa), pkdYear: str(entry.rokPkd), category: categorizePkd(str(pkd.kod)), phone: str(entry.telefon) || undefined, email: str(entry.email) || undefined, website: safeWebsite(entry.www), registryStatus: str(entry.status), syncedAt: new Date().toISOString() };
 }
 export function normalizeKrs(value: unknown, krs: string): RegistryCompany {
   const odpis = obj(obj(value).odpis), data = obj(odpis.dane), section = obj(data.dzial1), company = obj(section.danePodmiotu), identifiers = obj(company.identyfikatory), seat = obj(obj(section.siedzibaIAdres).siedziba), contact = obj(section.siedzibaIAdres);
@@ -21,7 +31,8 @@ export function normalizeKrs(value: unknown, krs: string): RegistryCompany {
   const code = [str(pkd.kodDzial), str(pkd.kodKlasa), str(pkd.kodPodklasa)].join('');
   const number = str(obj(odpis.naglowekA).numerKRS);
   if (number && number.padStart(10, '0') !== krs) throw new Error('Odpowiedź KRS dotyczy innego podmiotu.');
-  return { id: `KRS:${krs}`, registryId: krs, source: 'KRS', krs, name: required(company.nazwa, 'nazwa podmiotu KRS'), nip: str(identifiers.nip), regon: str(identifiers.regon) || undefined, city: str(seat.miejscowosc), voivodeship: str(seat.wojewodztwo), pkdMain: code, pkdName: str(pkd.opis), category: categorizePkd(code), email: str(contact.adresPocztyElektronicznej) || undefined, website: safeWebsite(contact.adresStronyInternetowej), syncedAt: new Date().toISOString() };
+  const header = obj(odpis.naglowekA);
+  return { id: `KRS:${krs}`, registryId: krs, source: 'KRS', krs, name: required(company.nazwa, 'nazwa podmiotu KRS'), nip: str(identifiers.nip), regon: str(identifiers.regon) || undefined, startedAt: dateOnly(header.dataPierwszegoWpisu ?? header.dataWpisuDoRejestru ?? header.dataWpisu), city: str(seat.miejscowosc), voivodeship: str(seat.wojewodztwo), pkdMain: code, pkdName: str(pkd.opis), category: categorizePkd(code), email: str(contact.adresPocztyElektronicznej) || undefined, website: safeWebsite(contact.adresStronyInternetowej), syncedAt: new Date().toISOString() };
 }
 export class RegistryError extends Error { constructor(message: string, public status = 502, public retryAfter?: string, public upstreamStatus?: number) { super(message); } }
 async function getJson(url: URL, token?: string): Promise<unknown> {
