@@ -12,6 +12,7 @@ export async function GET() {
     const data=await response.json().catch(()=>({}));
     const models=Array.isArray(data.models) ? data.models.filter((item: {name?:unknown;supportedGenerationMethods?:string[]})=>typeof item.name==='string' && /^models\/gemini-[a-z0-9.-]+$/.test(item.name) && item.supportedGenerationMethods?.includes('generateContent')).map((item: {name:string})=>item.name.slice(7)) : [];
     // Never return the key, request headers or raw provider error text.
-    return Response.json({configured:true,provider:'gemini',model:GEMINI_MODEL,listStatus:response.status,available:models.includes(GEMINI_MODEL),models},{headers:{'Cache-Control':'no-store'}});
+    const keyRejected=/API_KEY_INVALID|API_KEY_EXPIRED|API key not valid|API key expired|reported as leaked/i.test(JSON.stringify(data.error || {}));
+    return Response.json({configured:true,provider:'gemini',model:GEMINI_MODEL,listStatus:response.status,keyRejected,available:models.includes(GEMINI_MODEL) ? true : data.nextPageToken ? null : false,models},{headers:{'Cache-Control':'no-store'}});
   } catch(error) { return errorResponse(error); }
 }
