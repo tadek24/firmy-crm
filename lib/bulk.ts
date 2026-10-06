@@ -107,7 +107,7 @@ export async function bulkStep(expectedId?: string, generation?: number) {
         const saved = await upsertRegistry(accepted, 'CEIDG', false, false);
         if (job.selection) {
           job.selection.qualified += await addProspects(job.id, saved, job.selection.target - job.selection.qualified, options);
-          job.selection.checked += ids.length; job.selection.excluded += ids.length - saved.filter(qualifiesForProspecting).length;
+          job.selection.checked += ids.length; job.selection.excluded += ids.length - saved.filter(firm => qualifiesForProspecting(firm, options)).length;
         }
         job.pending = job.pending.slice(ids.length); job.processed += ids.length; job.saved += saved.length; job.skipped += ids.length - saved.length;
         job.withWebsite += saved.filter(f => f.website).length; job.withEmail += saved.filter(f => f.email).length; job.withPhone += saved.filter(f => f.phone).length;
