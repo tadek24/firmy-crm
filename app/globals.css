@@ -23,3 +23,21 @@
 .team-admin-form { margin-top: 24px; border-top: 1px solid var(--line,#d8dee5); padding-top: 18px; }
 .team-actions { display: flex; gap: 12px; }
 @media(max-width: 900px) { .team-admin-grid { grid-template-columns: 1fr; } }
+
+/* Year cohorts: flat, operational navigation and progress. */
+.year-filter-strip {display:flex;align-items:stretch;gap:0;overflow-x:auto;border-top:1px solid var(--line, #d8dde2);border-bottom:1px solid var(--line, #d8dde2);background:#fff;}
+.year-filter-strip > span {padding:14px 16px;white-space:nowrap;font-size:12px;color:#657381;align-self:center;}
+.year-filter-strip button {border:0;border-left:1px solid #e3e7ea;border-radius:0;white-space:nowrap;padding:12px 18px;background:transparent;font-weight:600;}
+.year-filter-strip button small {display:block;font-weight:400;color:#657381;margin-top:4px;}
+.year-filter-strip button.active {background:#173c43;color:white;}
+.year-filter-strip button.active small {color:#d2e4e7;}
+.year-group th {background:#edf2f2;color:#173c43;padding:13px 16px;text-align:left;font-size:14px;letter-spacing:0;text-transform:none;border-top:2px solid #b7c8ca;}
+.year-group th span {margin-left:20px;font-size:12px;font-weight:400;color:#657381;}
+.started-column {white-space:nowrap;min-width:125px;}
+.year-import-wrap {overflow-x:auto;}
+.year-import-table {width:100%;border-collapse:collapse;margin:16px 0;}
+.year-import-table th,.year-import-table td {padding:12px;border-bottom:1px solid #d8dde2;text-align:left;font-size:13px;}
+.year-import-table th {font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#657381;}
+.year-import-table tr.current-year td {background:#eef4f3;}
+.bulk-actions input[type=number] {width:120px;border:1px solid #c8d1d9;padding:10px;border-radius:0;}
+@media(max-width:700px) {.year-filter-strip button {padding:10px 14px;}.year-group th span {display:block;margin:4px 0 0;}.year-import-table {min-width:540px;}}
