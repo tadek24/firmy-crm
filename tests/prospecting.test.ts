@@ -9,7 +9,7 @@ import { controlBulk, bulkStatus, bulkStep } from '../lib/bulk';
 import { normalizeCeidg } from '../lib/registries';
 import { qualifiesForProspecting } from '../lib/prospecting';
 import { parseContactFilter } from '../lib/contact-filters';
-const entry = (id: string, extra = {}) => ({ id, nazwa: id, status: 'AKTYWNY', rokPkd: '2007', adresDzialalnosci: { miasto: 'Łódź' }, pkdGlowny: { kod: '62.01.Z', nazwa: 'Oprogramowanie' }, ...extra });
+const entry = (id: string, extra = {}) => ({ id, nazwa: id, status: 'AKTYWNY', dataRozpoczecia: `${new Date().getUTCFullYear()}-01-01`, rokPkd: '2007', adresDzialalnosci: { miasto: 'Łódź' }, pkdGlowny: { kod: '62.01.Z', nazwa: 'Oprogramowanie' }, ...extra });
 test('Contact filters combine with paging; focused import preserves cursor, excludes opt-outs, caps queue and checking budget', async () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'crm-prospects-'));
   process.env.CRM_TEST_DB_PATH = path.join(directory, 'test.sqlite'); process.env.CEIDG_API_TOKEN = 'fixture-token';

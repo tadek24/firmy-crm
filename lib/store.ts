@@ -56,7 +56,7 @@ function unpack(row: Row): Company {
 }
 export async function listCompanies() { await setup(); return ((await query('SELECT * FROM companies ORDER BY rowid DESC')).rows as Row[]).map(unpack); }
 export async function getCompany(id: string) { await setup(); const row = (await query('SELECT * FROM companies WHERE id=?',[id])).rows[0] as Row | undefined; return row ? unpack(row) : null; }
-export async function companyPage(search = '', status = 'Wszystkie', category = 'Wszystkie', page = 0, contact = 'all', scope = 'all', owner = '', tag = '', sort = 'fit') {
+export async function companyPage(search = '', status = 'Wszystkie', category = 'Wszystkie', page = 0, contact = 'all', scope = 'all', owner = '', tag = '', sort = 'fit', year = '') {
   await setup(); const clauses: string[] = [], parameters: string[] = [];
   if (search.trim()) {
     clauses.push("(coalesce(json_extract(registry,'$.search'),lower(registry)) || coalesce(json_extract(crm,'$.searchTags'),lower(json_extract(crm,'$.tags')))) LIKE ? ESCAPE '\\'");
@@ -73,14 +73,22 @@ export async function companyPage(search = '', status = 'Wszystkie', category = 
   if (contactFilter === 'any') clauses.push(`(${contactPresent('email')}=1 OR ${contactPresent('phone')}=1 OR ${contactPresent('website')}=1)`);
   if (contactFilter === 'none') clauses.push(`(${contactPresent('email')}=0 AND ${contactPresent('phone')}=0 AND ${contactPresent('website')}=0)`);
   if (scope === 'prospects') {
-    clauses.push("EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id)");
+    const campaign = (await query("SELECT id,json_extract(data,'$.yearly') AS yearly FROM bulk_jobs ORDER BY rowid DESC LIMIT 1")).rows[0];
+    if (campaign?.yearly) { clauses.push("EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id AND jobId=?)"); parameters.push(String(campaign.id)); }
+    else clauses.push("EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id)");
     clauses.push("json_extract(crm,'$.status') NOT IN ('Nie kontaktować','Nie zainteresowany','Klient')");
   }
+  const yearExpression = "CASE WHEN json_extract(registry,'$.startedAt') GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN substr(json_extract(registry,'$.startedAt'),1,4) ELSE 'unknown' END";
+  const beforeYear = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
+  const yearCounts = (await query(`SELECT ${yearExpression} AS year,count(*) AS count FROM companies${beforeYear} GROUP BY ${yearExpression} ORDER BY year`, parameters)).rows.map(row => ({ year: String(row.year), count: Number(row.count) }));
+  if (/^\d{4}$/.test(year) || year === 'unknown') { clauses.push(`(${yearExpression})=?`); parameters.push(year); }
   const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
   const summary = await batch([{ sql: 'SELECT * FROM metrics WHERE id=1' }, { sql: "SELECT DISTINCT json_extract(registry,'$.category') AS category FROM companies ORDER BY category" }, ...(where ? [{ sql: `SELECT count(*) AS n FROM companies${where}`, args: parameters }] : [])]);
   const stats = summary[0].rows[0]; const total = Number(where ? summary[2].rows[0].n : stats.total);
   const currentPage = Math.min(Math.max(0, page), Math.max(0, Math.ceil(total / 100) - 1));
-  const order = sort === 'startedAsc'
+  const order = sort === 'yearAsc'
+    ? `CASE WHEN (${yearExpression})='unknown' THEN 1 ELSE 0 END,(${yearExpression}) ASC,coalesce(json_extract(registry,'$.analysis.fitScore'),0) DESC,rowid DESC`
+    : sort === 'startedAsc'
     ? "CASE WHEN json_extract(registry,'$.startedAt') IS NULL OR json_extract(registry,'$.startedAt')='' THEN 1 ELSE 0 END,json_extract(registry,'$.startedAt') ASC,rowid DESC"
     : sort === 'startedDesc'
       ? "CASE WHEN json_extract(registry,'$.startedAt') IS NULL OR json_extract(registry,'$.startedAt')='' THEN 1 ELSE 0 END,json_extract(registry,'$.startedAt') DESC,rowid DESC"
@@ -90,12 +98,13 @@ export async function companyPage(search = '', status = 'Wszystkie', category = 
     { sql: "SELECT DISTINCT json_extract(crm,'$.assignee') AS name FROM companies WHERE trim(coalesce(json_extract(crm,'$.assignee'),''))!='' ORDER BY name" },
     { sql: "SELECT DISTINCT value AS name FROM companies,json_each(companies.crm,'$.tags') ORDER BY name" },
   ]);
-  return { companies, total, page: currentPage, pageSize: 100, stats, categories: summary[1].rows.map(row => row.category), assignees: labels[0].rows.map(row => String(row.name)), tags: labels[1].rows.map(row => String(row.name)) };
+  return { companies, total, page: currentPage, pageSize: 100, stats, yearCounts, categories: summary[1].rows.map(row => row.category), assignees: labels[0].rows.map(row => String(row.name)), tags: labels[1].rows.map(row => String(row.name)) };
 }
-export async function addProspects(jobId: string, companies: Company[], remaining: number, options: { minStartedAt?: string; maxStartedAt?: string } = {}) {
+type ProspectOptions = { minStartedAt?: string; maxStartedAt?: string; includeExisting?: boolean };
+export async function addProspects(jobId: string, companies: Company[], remaining: number, options: ProspectOptions = {}) {
   const eligible = companies.filter(company => qualifiesForProspecting(company, options));
   if (!eligible.length || remaining <= 0) return 0;
-  const current = (await query(`SELECT companyId FROM prospect_members WHERE companyId IN (${eligible.map(() => '?').join(',')})`, eligible.map(company => company.id))).rows.map(row => row.companyId);
+  const current = (await query(`SELECT companyId FROM prospect_members WHERE ${options.includeExisting ? 'jobId=? AND ' : ''}companyId IN (${eligible.map(() => '?').join(',')})`, [...(options.includeExisting ? [jobId] : []), ...eligible.map(company => company.id)])).rows.map(row => row.companyId);
   const next = eligible.filter(company => !current.includes(company.id)).slice(0, remaining);
   const writes = next.flatMap(company => [
     { sql: "UPDATE companies SET registry=json_set(registry,'$.analysis',json(?)) WHERE id=?", args: [JSON.stringify(analyzeCompany(company)), company.id] },
@@ -108,8 +117,8 @@ export async function addProspects(jobId: string, companies: Company[], remainin
   }
   return added;
 }
-export async function seedProspects(jobId: string, target: number, maxChecks: number, options: { minStartedAt?: string; maxStartedAt?: string } = {}) {
-  const rows = (await query(`SELECT * FROM companies WHERE source='CEIDG' AND json_extract(registry,'$.registryStatus')='AKTYWNY' AND (${contactPresent('email')}=1 OR ${contactPresent('phone')}=1) AND (? IS NULL OR json_extract(registry,'$.startedAt')>=?) AND (? IS NULL OR json_extract(registry,'$.startedAt')<=?) AND NOT EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id) ORDER BY rowid DESC LIMIT ?`, [options.minStartedAt || null, options.minStartedAt || null, options.maxStartedAt || null, options.maxStartedAt || null, maxChecks])).rows as Row[];
+export async function seedProspects(jobId: string, target: number, maxChecks: number, options: ProspectOptions = {}) {
+  const rows = (await query(`SELECT * FROM companies WHERE source='CEIDG' AND json_extract(registry,'$.registryStatus')='AKTYWNY' AND (${contactPresent('email')}=1 OR ${contactPresent('phone')}=1) AND (? IS NULL OR json_extract(registry,'$.startedAt')>=?) AND (? IS NULL OR json_extract(registry,'$.startedAt')<=?) AND NOT EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id${options.includeExisting ? ' AND jobId=?' : ''}) ORDER BY rowid DESC LIMIT ?`, [options.minStartedAt || null, options.minStartedAt || null, options.maxStartedAt || null, options.maxStartedAt || null, ...(options.includeExisting ? [jobId] : []), maxChecks])).rows as Row[];
   const candidates = rows.map(unpack).filter(company => qualifiesForProspecting(company, options)).sort((a,b) => (b.analysis?.fitScore || 0) - (a.analysis?.fitScore || 0));
   return addProspects(jobId, candidates.slice(0, target), target, options);
 }
