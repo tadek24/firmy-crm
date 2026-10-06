@@ -10,7 +10,7 @@ import { aiStatus, aiUsage, performAnalysis, publicProfile, publicUrl, readRepor
 
 const source = 'https://firma.example/oferta';
 const report = { summary:'Dopasowanie usług WWW',website:{url:source,identity:'potwierdzona',evidence:'NIP w źródle',findings:[{statement:'Oferta usług',sourceUrl:source},{statement:'Niepoparty fakt',sourceUrl:'https://invented.example/'}],improvements:[{action:'Formularz zapytań',benefit:'Ułatwienie kontaktu',basis:'fakt',sourceUrl:'https://invented.example/'}]},marketplaces:[{channel:'Allegro',country:'Polska',potential:'wysoki',reason:'Hipoteza',offer:'Integracja',requirements:['Sprawdzić asortyment'],sourceUrl:'https://invented.example/'}],questions:['Jaki jest asortyment?'],limitations:['Nie mierzono wydajności'] };
-const responseData = () => ({ status:'completed',output:[{type:'web_search_call',action:{type:'search',sources:[{title:'Oferta firmy',url:source}]}},{type:'message',content:[{type:'output_text',text:JSON.stringify(report)}]}],usage:{input_tokens:10000,output_tokens:2000} });
+const responseData = () => ({ status:'completed',output:[{type:'web_search_call',action:{type:'search',sources:[{title:'Oferta firmy',url:source}]}},{type:'message',content:[{type:'output_text',text:JSON.stringify({...report,presence:[],websiteReview:{summary:'Oferta firmy',pages:[],notChecked:[]},offers:[]})}]}],usage:{input_tokens:10000,output_tokens:2000} });
 
 test('AI source validation removes unsupported facts and marks unsupported opportunities as unknown', () => {
   const result = readReport(responseData());
@@ -33,7 +33,9 @@ test('AI budget reservation, repeated clicks, saved reports, privacy, failures a
     for (const privateValue of ['Prywatne ustalenia','Basia','Pilne','private@example.com','123456789','test-only-not-a-real-key']) assert.ok(!serialized.includes(privateValue));
     globalThis.fetch=async (url,options) => {
       calls++; assert.equal(String(url),'https://api.openai.com/v1/responses');
-      const body=JSON.parse(String(options?.body)); assert.equal(body.store,false); assert.equal(body.max_tool_calls,3);
+      const body=JSON.parse(String(options?.body)); assert.equal(body.store,false); assert.equal(body.max_tool_calls,12);
+      assert.equal(body.tools[0].search_context_size,'medium'); assert.equal(body.max_output_tokens,8000);
+      assert.ok(body.text.format.schema.required.includes('presence')); assert.ok(body.text.format.schema.required.includes('websiteReview'));
       assert.equal(body.input,serialized);
       return Response.json(responseData());
     };

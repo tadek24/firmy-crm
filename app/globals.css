@@ -15,6 +15,7 @@
 .ai-row-button{margin-top:10px;font-size:12px;padding:6px 10px}.ai-analysis{margin-top:24px;border-top:2px solid var(--ink);padding-top:20px}.ai-analysis h4{margin-top:22px}.ai-analysis ul{padding-left:20px;line-height:1.65}.ai-analysis a{overflow-wrap:anywhere}.ai-finding{border-top:1px solid var(--line);padding:14px 0}.ai-finding>strong,.ai-finding>.status-label{display:block}.ai-summary{font-weight:600;line-height:1.7}.ai-analysis details{margin:18px 0}
 
 .team-filter-line { grid-template-columns: 1fr 1fr; }
+.ai-task-error{display:block}.ai-task-error p{margin:8px 0}.ai-presence{margin:0}.ai-presence>div{border-top:1px solid var(--line);padding:12px 0}.ai-presence dt{display:flex;gap:10px;justify-content:space-between;align-items:baseline}.ai-presence dd{margin:0;font-size:12px;line-height:1.6}.ai-presence dd p{margin:7px 0}
 .team-panel { padding: 24px 0; }
 .team-admin-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.4fr); gap: 36px; }
 .team-admin-grid > section { min-width: 0; }
