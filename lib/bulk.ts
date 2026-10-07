@@ -59,7 +59,7 @@ export async function controlBulk(action: 'start' | 'pause' | 'resume' | 'focus'
       if (job?.state === 'running') throw new RegistryError('Wstrzymaj trwający import przed rozpoczęciem nowego zakresu.', 409);
       job = freshJob();
       job.yearly = { from, to, index: 0, years: [] };
-      await query('INSERT INTO bulk_jobs VALUES (?,?,?)', [job.id, job.state, JSON.stringify(job)]);
+      await query('INSERT INTO bulk_jobs(id,state,data) VALUES (?,?,?)', [job.id, job.state, JSON.stringify(job)]);
       for (let year = from; year <= to; year++) {
         const dates = { minStartedAt: `${year}-01-01`, maxStartedAt: year === thisYear ? today : `${year}-12-31` };
         const maxChecks = target * 100;
@@ -71,12 +71,12 @@ export async function controlBulk(action: 'start' | 'pause' | 'resume' | 'focus'
     } else if (action === 'start') {
       if (job && job.state !== 'complete') throw new RegistryError('Import już istnieje. Użyj Wznów, aby zachować postęp.', 409);
       job = freshJob();
-      await query('INSERT INTO bulk_jobs VALUES (?,?,?)', [job.id, job.state, JSON.stringify(job)]);
+      await query('INSERT INTO bulk_jobs(id,state,data) VALUES (?,?,?)', [job.id, job.state, JSON.stringify(job)]);
     } else if (action === 'focus') {
       if (!Number.isSafeInteger(target) || target < 1 || target > 5000) throw new RegistryError('Cel musi wynosić od 1 do 5000 firm.', 400);
       if (!job || job.state === 'complete') {
         job = freshJob();
-        await query('INSERT INTO bulk_jobs VALUES (?,?,?)', [job.id, job.state, JSON.stringify(job)]);
+        await query('INSERT INTO bulk_jobs(id,state,data) VALUES (?,?,?)', [job.id, job.state, JSON.stringify(job)]);
       }
       if (job.selection) throw new RegistryError('Selekcja już istnieje. Użyj Wznów, aby zachować kolejkę.', 409);
       const maxChecks = target * 10;
@@ -131,7 +131,7 @@ export async function bulkStep(expectedId?: string, generation?: number) {
         if (!ids.length) { if (page.nextPage === null) job.state = 'complete'; else job.page = page.nextPage; }
         if (job.state === 'complete' && job.selection) { job.selection.stopReason = 'exhausted'; job.message = 'Przejrzano dostępną listę CEIDG. Zebrano tylko znalezione dopasowania.'; }
         if (job.state === 'complete' && job.yearly) advanceYear(job, 'exhausted');
-        await batch([...ids.map(id => ({ sql: 'INSERT OR IGNORE INTO bulk_seen VALUES (?,?)', args: [job.id, id] })), saveStatement(job)]);
+        await batch([...ids.map(id => ({ sql: 'INSERT INTO bulk_seen VALUES (?,?) ON CONFLICT DO NOTHING', args: [job.id, id] })), saveStatement(job)]);
       });
     } else {
       const initialSelection = currentSelection(initial);

@@ -6,7 +6,7 @@ import { RegistryError } from './registries';
 import { analyzeCompany, ANALYSIS_VERSION } from './analysis';
 import { parseContactFilter } from './contact-filters';
 import { qualifiesForProspecting } from './prospecting';
-const contactPresent = (field: 'email' | 'phone' | 'website') => `(trim(coalesce(json_extract(registry,'$.${field}'),''))!='')`;
+const contactPresent = (field: 'email' | 'phone' | 'website') => `((trim(coalesce((registry::jsonb #>> '{${field}}'),''))!='')::int)`;
 export const statuses = ['Nowy', 'Do sprawdzenia', 'Do kontaktu', 'Kontakt wykonany', 'Zainteresowany', 'Oferta wysłana', 'Negocjacje', 'Klient', 'Nie zainteresowany', 'Nie kontaktować'] as const;
 export type RegistryCompany = Omit<Company, 'status' | 'tags' | 'note' | 'online' | 'lastContact' | 'assignee' | 'crmRevision' | 'crmUpdatedAt' | 'aiState'>;
 let ready: Promise<void> | undefined;
@@ -16,35 +16,38 @@ export function setup() {
 }
 async function initialize() {
   const schema = [
-    'CREATE TABLE IF NOT EXISTS companies (id TEXT PRIMARY KEY, source TEXT NOT NULL, registryId TEXT NOT NULL, nip TEXT, regon TEXT, krs TEXT, registry TEXT NOT NULL, crm TEXT NOT NULL, UNIQUE(source,registryId))',
+    'CREATE TABLE IF NOT EXISTS companies (id TEXT PRIMARY KEY, source TEXT NOT NULL, registryId TEXT NOT NULL, nip TEXT, regon TEXT, krs TEXT, registry TEXT NOT NULL, crm TEXT NOT NULL, rowid BIGSERIAL, UNIQUE(source,registryId))',
     'CREATE UNIQUE INDEX IF NOT EXISTS company_nip ON companies(nip) WHERE nip IS NOT NULL',
     'CREATE UNIQUE INDEX IF NOT EXISTS company_regon ON companies(regon) WHERE regon IS NOT NULL',
     'CREATE UNIQUE INDEX IF NOT EXISTS company_krs ON companies(krs) WHERE krs IS NOT NULL',
-    'CREATE TABLE IF NOT EXISTS imports (id INTEGER PRIMARY KEY, source TEXT NOT NULL, count INTEGER NOT NULL, createdAt TEXT NOT NULL)',
-    'CREATE TABLE IF NOT EXISTS api_requests (createdAt INTEGER NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS imports (id BIGSERIAL PRIMARY KEY, source TEXT NOT NULL, count INTEGER NOT NULL, createdAt TEXT NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS api_requests (createdAt BIGINT NOT NULL)',
     'CREATE INDEX IF NOT EXISTS api_request_time ON api_requests(createdAt)',
-    "CREATE INDEX IF NOT EXISTS company_status ON companies(json_extract(crm,'$.status'))",
-    "CREATE INDEX IF NOT EXISTS company_category ON companies(json_extract(registry,'$.category'))",
-    "CREATE INDEX IF NOT EXISTS company_assignee ON companies(json_extract(crm,'$.assignee'))",
-    "CREATE INDEX IF NOT EXISTS company_started_at ON companies(json_extract(registry,'$.startedAt'))",
+    "CREATE INDEX IF NOT EXISTS company_status ON companies((crm::jsonb #>> '{status}'))",
+    "CREATE INDEX IF NOT EXISTS company_category ON companies((registry::jsonb #>> '{category}'))",
+    "CREATE INDEX IF NOT EXISTS company_assignee ON companies((crm::jsonb #>> '{assignee}'))",
+    "CREATE INDEX IF NOT EXISTS company_started_at ON companies((registry::jsonb #>> '{startedAt}'))",
     ...(['email', 'phone', 'website'] as const).map(field => `CREATE INDEX IF NOT EXISTS company_contact_${field} ON companies(${contactPresent(field)})`),
     'CREATE TABLE IF NOT EXISTS metrics (id INTEGER PRIMARY KEY, total INTEGER NOT NULL, toContact INTEGER NOT NULL, active INTEGER NOT NULL, website INTEGER NOT NULL, email INTEGER NOT NULL, phone INTEGER NOT NULL)',
-    'CREATE TABLE IF NOT EXISTS bulk_jobs (id TEXT PRIMARY KEY, state TEXT NOT NULL, data TEXT NOT NULL)',
-    'CREATE TABLE IF NOT EXISTS worker_lease (id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, expiresAt INTEGER NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS bulk_jobs (id TEXT PRIMARY KEY, state TEXT NOT NULL, data TEXT NOT NULL,rowid BIGSERIAL)',
+    'CREATE TABLE IF NOT EXISTS worker_lease (id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, expiresAt BIGINT NOT NULL)',
     'CREATE TABLE IF NOT EXISTS bulk_seen (jobId TEXT NOT NULL, registryId TEXT NOT NULL, PRIMARY KEY(jobId,registryId))',
     'CREATE TABLE IF NOT EXISTS prospect_members (jobId TEXT NOT NULL, companyId TEXT NOT NULL, PRIMARY KEY(jobId,companyId))',
+    'CREATE INDEX IF NOT EXISTS prospect_members_company ON prospect_members(companyId,jobId)',
     'CREATE TABLE IF NOT EXISTS ai_jobs (companyId TEXT PRIMARY KEY, taskId TEXT NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL)',
     'CREATE TABLE IF NOT EXISTS ai_requests (id TEXT PRIMARY KEY, createdAt TEXT NOT NULL)',
     'CREATE INDEX IF NOT EXISTS ai_requests_date ON ai_requests(createdAt)',
-    'CREATE TABLE IF NOT EXISTS auth_attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expiresAt INTEGER NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS auth_attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expiresAt BIGINT NOT NULL)',
   ];
-  const flags = (prefix: string) => ({ toContact: `(json_extract(${prefix}.crm,'$.status')='Do kontaktu')`, active: `(json_extract(${prefix}.crm,'$.status') IN ('Zainteresowany','Oferta wysłana','Negocjacje'))`, website: `(coalesce(json_extract(${prefix}.registry,'$.website'),'')!='')`, email: `(coalesce(json_extract(${prefix}.registry,'$.email'),'')!='')`, phone: `(coalesce(json_extract(${prefix}.registry,'$.phone'),'')!='')` });
-  const next = flags('NEW'), old = flags('OLD'); const keys = Object.keys(next) as (keyof typeof next)[];
-  schema.push(`CREATE TRIGGER IF NOT EXISTS metrics_insert AFTER INSERT ON companies BEGIN UPDATE metrics SET total=total+1, ${keys.map(key => `${key}=${key}+${next[key]}`).join(',')} WHERE id=1; END`,
-    `CREATE TRIGGER IF NOT EXISTS metrics_update AFTER UPDATE ON companies BEGIN UPDATE metrics SET ${keys.map(key => `${key}=${key}+${next[key]}-${old[key]}`).join(',')} WHERE id=1; END`,
-    `CREATE TRIGGER IF NOT EXISTS metrics_delete AFTER DELETE ON companies BEGIN UPDATE metrics SET total=total-1, ${keys.map(key => `${key}=${key}-${old[key]}`).join(',')} WHERE id=1; END`);
+  schema.push('INSERT INTO metrics VALUES (1,0,0,0,0,0,0) ON CONFLICT DO NOTHING',
+    `CREATE OR REPLACE FUNCTION crm.update_metrics() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF TG_OP='INSERT' THEN UPDATE crm.metrics SET total=total+1,toContact=toContact+coalesce((NEW.crm::jsonb->>'status')='Do kontaktu',false)::int,active=active+coalesce((NEW.crm::jsonb->>'status') IN ('Zainteresowany','Oferta wysłana','Negocjacje'),false)::int,website=website+(coalesce(NEW.registry::jsonb->>'website','')!='')::int,email=email+(coalesce(NEW.registry::jsonb->>'email','')!='')::int,phone=phone+(coalesce(NEW.registry::jsonb->>'phone','')!='')::int WHERE id=1;
+      ELSIF TG_OP='DELETE' THEN UPDATE crm.metrics SET total=total-1,toContact=toContact-coalesce((OLD.crm::jsonb->>'status')='Do kontaktu',false)::int,active=active-coalesce((OLD.crm::jsonb->>'status') IN ('Zainteresowany','Oferta wysłana','Negocjacje'),false)::int,website=website-(coalesce(OLD.registry::jsonb->>'website','')!='')::int,email=email-(coalesce(OLD.registry::jsonb->>'email','')!='')::int,phone=phone-(coalesce(OLD.registry::jsonb->>'phone','')!='')::int WHERE id=1;
+      ELSE UPDATE crm.metrics SET toContact=toContact+coalesce((NEW.crm::jsonb->>'status')='Do kontaktu',false)::int-coalesce((OLD.crm::jsonb->>'status')='Do kontaktu',false)::int,active=active+coalesce((NEW.crm::jsonb->>'status') IN ('Zainteresowany','Oferta wysłana','Negocjacje'),false)::int-coalesce((OLD.crm::jsonb->>'status') IN ('Zainteresowany','Oferta wysłana','Negocjacje'),false)::int,website=website+(coalesce(NEW.registry::jsonb->>'website','')!='')::int-(coalesce(OLD.registry::jsonb->>'website','')!='')::int,email=email+(coalesce(NEW.registry::jsonb->>'email','')!='')::int-(coalesce(OLD.registry::jsonb->>'email','')!='')::int,phone=phone+(coalesce(NEW.registry::jsonb->>'phone','')!='')::int-(coalesce(OLD.registry::jsonb->>'phone','')!='')::int WHERE id=1; END IF; RETURN NULL; END $$`,
+    'DROP TRIGGER IF EXISTS metrics_change ON companies',
+    'CREATE TRIGGER metrics_change AFTER INSERT OR UPDATE OR DELETE ON companies FOR EACH ROW EXECUTE FUNCTION crm.update_metrics()',
+    'REVOKE ALL ON SCHEMA crm FROM PUBLIC');
   await batch(schema.map(sql => ({ sql })));
-  if (!(await query('SELECT 1 FROM metrics WHERE id=1')).rows.length) await query(`INSERT OR IGNORE INTO metrics SELECT 1,count(*),coalesce(sum(json_extract(crm,'$.status')='Do kontaktu'),0),coalesce(sum(json_extract(crm,'$.status') IN ('Zainteresowany','Oferta wysłana','Negocjacje')),0),coalesce(sum(coalesce(json_extract(registry,'$.website'),'')!=''),0),coalesce(sum(coalesce(json_extract(registry,'$.email'),'')!=''),0),coalesce(sum(coalesce(json_extract(registry,'$.phone'),'')!=''),0) FROM companies`);
 }
 type Row = { id: string; registry: string; crm: string };
 function unpack(row: Row): Company {
@@ -59,44 +62,44 @@ export async function getCompany(id: string) { await setup(); const row = (await
 export async function companyPage(search = '', status = 'Wszystkie', category = 'Wszystkie', page = 0, contact = 'all', scope = 'all', owner = '', tag = '', sort = 'fit', year = '') {
   await setup(); const clauses: string[] = [], parameters: string[] = [];
   if (search.trim()) {
-    clauses.push("(coalesce(json_extract(registry,'$.search'),lower(registry)) || coalesce(json_extract(crm,'$.searchTags'),lower(json_extract(crm,'$.tags')))) LIKE ? ESCAPE '\\'");
+    clauses.push("(coalesce((registry::jsonb #>> '{search}'),lower(registry)) || coalesce((crm::jsonb #>> '{searchTags}'),lower((crm::jsonb #>> '{tags}')))) LIKE ? ESCAPE '\\'");
     parameters.push(`%${search.trim().toLocaleLowerCase('pl').replace(/[\\%_]/g, '\\$&')}%`);
   }
-  if (status !== 'Wszystkie') { clauses.push("json_extract(crm,'$.status')=?"); parameters.push(status); }
-  if (category !== 'Wszystkie') { clauses.push("json_extract(registry,'$.category')=?"); parameters.push(category); }
-  if (owner === 'unassigned') clauses.push("trim(coalesce(json_extract(crm,'$.assignee'),''))=''");
-  else if (owner.startsWith('person:')) { clauses.push("json_extract(crm,'$.assignee')=?"); parameters.push(owner.slice(7)); }
-  if (tag) { clauses.push("EXISTS(SELECT 1 FROM json_each(companies.crm,'$.tags') WHERE value=?)"); parameters.push(tag); }
+  if (status !== 'Wszystkie') { clauses.push("(crm::jsonb #>> '{status}')=?"); parameters.push(status); }
+  if (category !== 'Wszystkie') { clauses.push("(registry::jsonb #>> '{category}')=?"); parameters.push(category); }
+  if (owner === 'unassigned') clauses.push("trim(coalesce((crm::jsonb #>> '{assignee}'),''))=''");
+  else if (owner.startsWith('person:')) { clauses.push("(crm::jsonb #>> '{assignee}')=?"); parameters.push(owner.slice(7)); }
+  if (tag) { clauses.push("EXISTS(SELECT 1 FROM jsonb_array_elements_text(coalesce(companies.crm::jsonb->'tags','[]'::jsonb)) AS tags(value) WHERE value=?)"); parameters.push(tag); }
   const contactFilter = parseContactFilter(contact);
   if (['email', 'phone', 'website'].includes(contactFilter)) clauses.push(`${contactPresent(contactFilter as 'email' | 'phone' | 'website')}=1`);
   if (contactFilter === 'direct') clauses.push(`(${contactPresent('email')}=1 OR ${contactPresent('phone')}=1)`);
   if (contactFilter === 'any') clauses.push(`(${contactPresent('email')}=1 OR ${contactPresent('phone')}=1 OR ${contactPresent('website')}=1)`);
   if (contactFilter === 'none') clauses.push(`(${contactPresent('email')}=0 AND ${contactPresent('phone')}=0 AND ${contactPresent('website')}=0)`);
   if (scope === 'prospects') {
-    const campaign = (await query("SELECT id,json_extract(data,'$.yearly') AS yearly FROM bulk_jobs ORDER BY rowid DESC LIMIT 1")).rows[0];
-    if (campaign?.yearly) { clauses.push("EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id AND jobId=?)"); parameters.push(String(campaign.id)); }
-    else clauses.push("EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id)");
-    clauses.push("json_extract(crm,'$.status') NOT IN ('Nie kontaktować','Nie zainteresowany','Klient')");
+    const campaign = (await query("SELECT id,(data::jsonb #>> '{yearly}') AS yearly FROM bulk_jobs ORDER BY rowid DESC LIMIT 1")).rows[0];
+    if (campaign?.yearly) { clauses.push("id IN (SELECT companyId FROM prospect_members WHERE jobId=?)"); parameters.push(String(campaign.id)); }
+    else clauses.push("id IN (SELECT companyId FROM prospect_members)");
+    clauses.push("(crm::jsonb #>> '{status}') NOT IN ('Nie kontaktować','Nie zainteresowany','Klient')");
   }
-  const yearExpression = "CASE WHEN json_extract(registry,'$.startedAt') GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN substr(json_extract(registry,'$.startedAt'),1,4) ELSE 'unknown' END";
+  const yearExpression = "CASE WHEN (registry::jsonb #>> '{startedAt}') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN substr((registry::jsonb #>> '{startedAt}'),1,4) ELSE 'unknown' END";
   const beforeYear = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
   const yearCounts = (await query(`SELECT ${yearExpression} AS year,count(*) AS count FROM companies${beforeYear} GROUP BY ${yearExpression} ORDER BY year`, parameters)).rows.map(row => ({ year: String(row.year), count: Number(row.count) }));
   if (/^\d{4}$/.test(year) || year === 'unknown') { clauses.push(`(${yearExpression})=?`); parameters.push(year); }
   const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
-  const summary = await batch([{ sql: 'SELECT * FROM metrics WHERE id=1' }, { sql: "SELECT DISTINCT json_extract(registry,'$.category') AS category FROM companies ORDER BY category" }, ...(where ? [{ sql: `SELECT count(*) AS n FROM companies${where}`, args: parameters }] : [])]);
+  const summary = await batch([{ sql: 'SELECT * FROM metrics WHERE id=1' }, { sql: "SELECT DISTINCT (registry::jsonb #>> '{category}') AS category FROM companies ORDER BY category" }, ...(where ? [{ sql: `SELECT count(*) AS n FROM companies${where}`, args: parameters }] : [])]);
   const stats = summary[0].rows[0]; const total = Number(where ? summary[2].rows[0].n : stats.total);
   const currentPage = Math.min(Math.max(0, page), Math.max(0, Math.ceil(total / 100) - 1));
   const order = sort === 'yearAsc'
-    ? `CASE WHEN (${yearExpression})='unknown' THEN 1 ELSE 0 END,(${yearExpression}) ASC,coalesce(json_extract(registry,'$.analysis.fitScore'),0) DESC,rowid DESC`
+    ? `CASE WHEN (${yearExpression})='unknown' THEN 1 ELSE 0 END,(${yearExpression}) ASC,coalesce((registry::jsonb #>> '{analysis,fitScore}')::int,0) DESC,rowid DESC`
     : sort === 'startedAsc'
-    ? "CASE WHEN json_extract(registry,'$.startedAt') IS NULL OR json_extract(registry,'$.startedAt')='' THEN 1 ELSE 0 END,json_extract(registry,'$.startedAt') ASC,rowid DESC"
+    ? "CASE WHEN (registry::jsonb #>> '{startedAt}') IS NULL OR (registry::jsonb #>> '{startedAt}')='' THEN 1 ELSE 0 END,(registry::jsonb #>> '{startedAt}') ASC,rowid DESC"
     : sort === 'startedDesc'
-      ? "CASE WHEN json_extract(registry,'$.startedAt') IS NULL OR json_extract(registry,'$.startedAt')='' THEN 1 ELSE 0 END,json_extract(registry,'$.startedAt') DESC,rowid DESC"
-      : scope === 'prospects' ? "coalesce(json_extract(registry,'$.analysis.fitScore'),0) DESC,rowid DESC" : 'rowid DESC';
+      ? "CASE WHEN (registry::jsonb #>> '{startedAt}') IS NULL OR (registry::jsonb #>> '{startedAt}')='' THEN 1 ELSE 0 END,(registry::jsonb #>> '{startedAt}') DESC,rowid DESC"
+      : scope === 'prospects' ? "coalesce((registry::jsonb #>> '{analysis,fitScore}')::int,0) DESC,rowid DESC" : 'rowid DESC';
   const companies = ((await query(`SELECT *, (SELECT state FROM ai_jobs WHERE companyId=companies.id) AS aiState FROM companies${where} ORDER BY ${order} LIMIT 100 OFFSET ?`, [...parameters, currentPage * 100])).rows as (Row & {aiState: Company['aiState']})[]).map(row => ({...unpack(row),aiState:row.aiState || undefined}));
   const labels = await batch([
-    { sql: "SELECT DISTINCT json_extract(crm,'$.assignee') AS name FROM companies WHERE trim(coalesce(json_extract(crm,'$.assignee'),''))!='' ORDER BY name" },
-    { sql: "SELECT DISTINCT value AS name FROM companies,json_each(companies.crm,'$.tags') ORDER BY name" },
+    { sql: "SELECT DISTINCT (crm::jsonb #>> '{assignee}') AS name FROM companies WHERE trim(coalesce((crm::jsonb #>> '{assignee}'),''))!='' ORDER BY name" },
+    { sql: "SELECT DISTINCT value AS name FROM companies,jsonb_array_elements_text(coalesce(companies.crm::jsonb->'tags','[]'::jsonb)) AS tags(value) ORDER BY name" },
   ]);
   return { companies, total, page: currentPage, pageSize: 100, stats, yearCounts, categories: summary[1].rows.map(row => row.category), assignees: labels[0].rows.map(row => String(row.name)), tags: labels[1].rows.map(row => String(row.name)) };
 }
@@ -107,8 +110,8 @@ export async function addProspects(jobId: string, companies: Company[], remainin
   const current = (await query(`SELECT companyId FROM prospect_members WHERE ${options.includeExisting ? 'jobId=? AND ' : ''}companyId IN (${eligible.map(() => '?').join(',')})`, [...(options.includeExisting ? [jobId] : []), ...eligible.map(company => company.id)])).rows.map(row => row.companyId);
   const next = eligible.filter(company => !current.includes(company.id)).slice(0, remaining);
   const writes = next.flatMap(company => [
-    { sql: "UPDATE companies SET registry=json_set(registry,'$.analysis',json(?)) WHERE id=?", args: [JSON.stringify(analyzeCompany(company)), company.id] },
-    { sql: 'INSERT OR IGNORE INTO prospect_members VALUES (?,?)', args: [jobId, company.id] },
+    { sql: "UPDATE companies SET registry=jsonb_set(registry::jsonb,'{analysis}',?::jsonb)::text WHERE id=?", args: [JSON.stringify(analyzeCompany(company)), company.id] },
+    { sql: 'INSERT INTO prospect_members VALUES (?,?) ON CONFLICT DO NOTHING', args: [jobId, company.id] },
   ]);
   let added = 0;
   for (let offset = 0; offset < writes.length; offset += 100) {
@@ -118,7 +121,7 @@ export async function addProspects(jobId: string, companies: Company[], remainin
   return added;
 }
 export async function seedProspects(jobId: string, target: number, maxChecks: number, options: ProspectOptions = {}) {
-  const rows = (await query(`SELECT * FROM companies WHERE source='CEIDG' AND json_extract(registry,'$.registryStatus')='AKTYWNY' AND (${contactPresent('email')}=1 OR ${contactPresent('phone')}=1) AND (? IS NULL OR json_extract(registry,'$.startedAt')>=?) AND (? IS NULL OR json_extract(registry,'$.startedAt')<=?) AND NOT EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id${options.includeExisting ? ' AND jobId=?' : ''}) ORDER BY rowid DESC LIMIT ?`, [options.minStartedAt || null, options.minStartedAt || null, options.maxStartedAt || null, options.maxStartedAt || null, ...(options.includeExisting ? [jobId] : []), maxChecks])).rows as Row[];
+  const rows = (await query(`SELECT * FROM companies WHERE source='CEIDG' AND (registry::jsonb #>> '{registryStatus}')='AKTYWNY' AND (${contactPresent('email')}=1 OR ${contactPresent('phone')}=1) AND (?::text IS NULL OR (registry::jsonb #>> '{startedAt}')>=?) AND (?::text IS NULL OR (registry::jsonb #>> '{startedAt}')<=?) AND NOT EXISTS(SELECT 1 FROM prospect_members WHERE companyId=companies.id${options.includeExisting ? ' AND jobId=?' : ''}) ORDER BY rowid DESC LIMIT ?`, [options.minStartedAt || null, options.minStartedAt || null, options.maxStartedAt || null, options.maxStartedAt || null, ...(options.includeExisting ? [jobId] : []), maxChecks])).rows as Row[];
   const candidates = rows.map(unpack).filter(company => qualifiesForProspecting(company, options)).sort((a,b) => (b.analysis?.fitScore || 0) - (a.analysis?.fitScore || 0));
   return addProspects(jobId, candidates.slice(0, target), target, options);
 }
@@ -148,7 +151,7 @@ export async function upsertRegistry(items: RegistryCompany[], source: string, m
       const registry = { ...item, id, nip: item.nip || old?.nip || '', regon: item.regon || old?.regon, krs: item.krs || old?.krs, startedAt: item.startedAt || old?.startedAt, search: [item.name, item.nip, item.regon, item.krs, item.city, item.pkdMain].join(' ').toLocaleLowerCase('pl') };
       const crm = existing ? JSON.parse(existing.crm) : { status: 'Nowy', tags: [], online: [], note: '', assignee: '', crmRevision: '0' };
       registry.analysis = analyzeCompany(registry);
-      writes.push({ sql: 'INSERT INTO companies VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET source=excluded.source,registryId=excluded.registryId,nip=excluded.nip,regon=excluded.regon,krs=excluded.krs,registry=excluded.registry', args: [id, registry.source, registry.registryId, registry.nip || null, registry.regon || null, registry.krs || null, JSON.stringify(registry), JSON.stringify(crm)] });
+      writes.push({ sql: 'INSERT INTO companies(id,source,registryId,nip,regon,krs,registry,crm) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET source=excluded.source,registryId=excluded.registryId,nip=excluded.nip,regon=excluded.regon,krs=excluded.krs,registry=excluded.registry', args: [id, registry.source, registry.registryId, registry.nip || null, registry.regon || null, registry.krs || null, JSON.stringify(registry), JSON.stringify(crm)] });
       result.push({ ...registry, ...crm, assignee: crm.assignee || '', crmRevision: crm.crmRevision || '0' });
     });
     if (logImport) writes.push({ sql: 'INSERT INTO imports(source,count,createdAt) VALUES (?,?,?)', args: [source, items.length, new Date().toISOString()] });
