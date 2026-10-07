@@ -14,3 +14,7 @@ src/generated/prisma/
 
 app/.well-known/workflow/
 .workflow-data/
+.npm-cache/
+.test-temp/
+.test-bootstrap.cjs
+.swc/
