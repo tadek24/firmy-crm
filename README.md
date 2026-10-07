@@ -4,7 +4,7 @@ CRM z rzeczywistymi danymi CEIDG i KRS, trwałą bazą Supabase i importem w tle
 
 ## Konfiguracja
 
-1. Utwórz projekt Supabase Free. W Connect wybierz Transaction pooler (port 6543), uzupełnij hasło w URI i zapisz je jako `SUPABASE_DATABASE_URL` w Vercel. Kod używa szyfrowanego połączenia PostgreSQL, bez prepared statements. Data API nie jest potrzebne.
+1. Utwórz projekt Supabase Free. W Connect wybierz Transaction pooler (port 6543), uzupełnij hasło w URI i zapisz je jako `SUPABASE_DATABASE_URL` w Vercel. Kod używa szyfrowanego połączenia PostgreSQL, bez prepared statements. Data API nie jest potrzebne. Opcjonalnie ustaw `SUPABASE_DATABASE_PASSWORD` jako osobny sekret z hasłem bez kodowania URL; zastępuje hasło zawarte w URI.
 2. W Settings → Environment Variables dodaj `CEIDG_API_TOKEN`, `CRM_PASSWORD` (minimum 12 znaków) i `CRM_SESSION_SECRET` (losowy sekret minimum 32 znaki). Wybierz Production oraz używane środowisko Preview.
 3. Wykonaj ponowne wdrożenie. Istniejące wdrożenia nie otrzymują nowych zmiennych automatycznie.
 4. Zaloguj się do CRM i wybierz Rejestry i import. Import pojedynczej firmy sprawdza token online; obecność konfiguracji sama nie potwierdza jego ważności.
