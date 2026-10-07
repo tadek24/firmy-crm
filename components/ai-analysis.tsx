@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from 'react';
 import type { AiTask } from '@/lib/ai-analysis';
+import { startVisiblePolling } from '@/lib/visible-polling';
 
 type Status = { task: AiTask | null; configured: boolean; provider: 'openai' | 'gemini'; dailyLimit: number; used: number };
 export function AiAnalysis({ companyId, launchToken = 0 }: { companyId: string; launchToken?: number }) {
@@ -8,6 +9,7 @@ export function AiAnalysis({ companyId, launchToken = 0 }: { companyId: string; 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [refreshConfirmed, setRefreshConfirmed] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -15,12 +17,13 @@ export function AiAnalysis({ companyId, launchToken = 0 }: { companyId: string; 
         const response = await fetch(`/api/companies/${encodeURIComponent(companyId)}/analysis`, { cache: 'no-store' });
         const status = await response.json();
         if (!response.ok) throw new Error(status.error || 'Nie można odczytać analizy AI.');
-        if (!cancelled) setData(status);
-      } catch (error) { if (!cancelled) setError((error as Error).message); }
+        if (!cancelled) { setData(status); setError(''); }
+        return status.task?.state === 'queued' || status.task?.state === 'running' ? 5000 : null;
+      } catch (error) { if (!cancelled) setError((error as Error).message); return null; }
     }
-    void load(); const timer = setInterval(load, 5000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, [companyId, launchToken]);
+    const stop = startVisiblePolling(load);
+    return () => { cancelled = true; stop(); };
+  }, [companyId, launchToken, refreshVersion]);
   async function run(force: boolean) {
     setBusy(true); setError(''); setRefreshConfirmed(false);
     try {
@@ -28,6 +31,7 @@ export function AiAnalysis({ companyId, launchToken = 0 }: { companyId: string; 
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Nie udało się uruchomić analizy.');
       setData(current => current ? { ...current, task:result.task, used:current.used + (result.created ? 1 : 0) } : current);
+      setRefreshVersion(value => value + 1);
     } catch (error) { setError((error as Error).message); } finally { setBusy(false); }
   }
   const gemini = data?.provider === 'gemini';

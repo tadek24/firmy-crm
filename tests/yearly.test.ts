@@ -68,5 +68,5 @@ test('Yearly campaign bounds upstream dates, independent quotas, existing CRM, p
     assert.equal((await companyPage('', 'Wszystkie', 'Wszystkie', 0, 'all', 'all', '', '', 'fit', "2020' OR 1=1")).total,(await companyPage()).total);
     await clearRate(); globalThis.fetch = async () => Response.json({firmy:[{id:'bad'}],links:{next:'https://dane.biznes.gov.pl/api/ceidg/v3/firmy?status=AKTYWNY&dataod=2026-01-01&page=1'}});
     await assert.rejects(ceidgActivePage(0,{minStartedAt:'2020-01-01',maxStartedAt:'2020-12-31'}),/odsyłacz/);
-  } finally { globalThis.fetch = originalFetch; closeTestDatabase(); rmSync(directory, {recursive:true,force:true}); }
+  } finally { globalThis.fetch = originalFetch; await closeTestDatabase(); rmSync(directory, {recursive:true,force:true}); }
 });

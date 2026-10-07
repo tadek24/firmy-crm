@@ -1,10 +1,10 @@
 # Firmy CRM na Vercel
 
-CRM z rzeczywistymi danymi CEIDG i KRS, trwałą bazą Turso i importem w tle obsługiwanym przez Vercel Workflow. Przeglądarka ani komputer użytkownika nie muszą pozostawać włączone.
+CRM z rzeczywistymi danymi CEIDG i KRS, trwałą bazą Supabase i importem w tle obsługiwanym przez Vercel Workflow. Przeglądarka ani komputer użytkownika nie muszą pozostawać włączone.
 
 ## Konfiguracja
 
-1. W projekcie Vercel otwórz Storage, utwórz bazę Turso i połącz ją z projektem. Integracja ustawia `TURSO_DATABASE_URL` oraz `TURSO_AUTH_TOKEN`.
+1. Utwórz projekt Supabase Free. W Connect wybierz Transaction pooler (port 6543), uzupełnij hasło w URI i zapisz je jako `SUPABASE_DATABASE_URL` w Vercel. Kod używa szyfrowanego połączenia PostgreSQL, bez prepared statements. Data API nie jest potrzebne.
 2. W Settings → Environment Variables dodaj `CEIDG_API_TOKEN`, `CRM_PASSWORD` (minimum 12 znaków) i `CRM_SESSION_SECRET` (losowy sekret minimum 32 znaki). Wybierz Production oraz używane środowisko Preview.
 3. Wykonaj ponowne wdrożenie. Istniejące wdrożenia nie otrzymują nowych zmiennych automatycznie.
 4. Zaloguj się do CRM i wybierz Rejestry i import. Import pojedynczej firmy sprawdza token online; obecność konfiguracji sama nie potwierdza jego ważności.
@@ -17,7 +17,7 @@ Bieżący import zbiera po 1000 dopasowanych firm na każdy rok rozpoczęcia, do
 
 Workflow wykonuje krótkie serie pobrań, a następnie usypia w chmurze. Co 100 serii uruchamia kolejny przebieg od trwałego punktu zapisu, aby nie przekraczać limitów liczby zdarzeń jednego Workflow. Blokada w bazie zapobiega jednoczesnemu przetwarzaniu przez dwa procesy. Limit aplikacji to maksymalnie 1000 zapytań na godzinę z odstępem minimum 3,6 sekundy; pętla czeka minimum 4 sekundy. Inne aplikacje z tym samym tokenem współdzielą limit CEIDG. HTTP 429 respektuje Retry-After, błędy przejściowe mają do 10 ponowień, odrzucony token i konflikt danych zatrzymują import. Awaria Workflow pozostawia punkt zapisu; można wstrzymać i wznowić import w interfejsie, po sprawdzeniu błędu w panelu Workflows na Vercel.
 
-Ogólnopolski import może trwać wiele dni i podlega limitom pojemności, operacji oraz zasobów wybranego planu Turso/Vercel. Przekroczenie limitów bezpłatnego planu wymaga odczekania lub świadomej zmiany planu; aplikacja nie kupuje abonamentów. Postęp i firmy pozostają w bazie. Rejestr zmienia się w czasie pobierania, więc nie jest to zamrożony obraz danych. Nieaktywne lub nieudostępnione szczegóły są pomijane. WWW, e-mail i telefon są opcjonalne i zapisujemy wyłącznie kontakty udostępnione przez przedsiębiorcę. Nie dopowiadamy adresów i nie przeszukujemy stron WWW.
+Ogólnopolski import może trwać wiele dni i podlega limitom pojemności, operacji oraz zasobów wybranego planu Supabase/Vercel. Przekroczenie limitów bezpłatnego planu wymaga odczekania lub świadomej zmiany planu; aplikacja nie kupuje abonamentów. Postęp i firmy pozostają w bazie. Rejestr zmienia się w czasie pobierania, więc nie jest to zamrożony obraz danych. Nieaktywne lub nieudostępnione szczegóły są pomijane. WWW, e-mail i telefon są opcjonalne i zapisujemy wyłącznie kontakty udostępnione przez przedsiębiorcę. Nie dopowiadamy adresów i nie przeszukujemy stron WWW.
 
 ## CEIDG i KRS
 
@@ -27,9 +27,9 @@ KRS: https://prs.ms.gov.pl/krs/openApi, `/api/krs/OdpisAktualny/{krs}?rejestr=P&
 
 ## Weryfikacja i rozwój
 
-Node.js 24.14+. `npm install`, `npm run lint`, `npm run test:integrations`, `npm run build`. Vercel instaluje bibliotekę Workflow i generuje wewnętrzne trasy `.well-known/workflow` podczas budowania. Generowane trasy są ignorowane przez Git. Testy używają kontrolowanych odpowiedzi rejestrów oraz osobnej bazy tymczasowej; sprawdzają także oficjalny protokół Turso HTTP, transakcje, kontakty, deduplikację, sesje i przerwanie zadania podczas zapytania. Nie zapisują danych demonstracyjnych w CRM.
+Node.js 24.14+. `npm install`, `npm run lint`, `npm run test:integrations`, `npm run build`. Vercel instaluje bibliotekę Workflow i generuje wewnętrzne trasy `.well-known/workflow` podczas budowania. Generowane trasy są ignorowane przez Git. Testy używają kontrolowanych odpowiedzi rejestrów oraz osobnej bazy tymczasowej; sprawdzają także PostgreSQL, transakcje, kontakty, deduplikację, sesje i przerwanie zadania podczas zapytania. Nie zapisują danych demonstracyjnych w CRM.
 
-Archiwalne pliki Prisma i docker-compose nie obsługują tej aplikacji. Magazyn produkcyjny korzysta z Turso przez SQL over HTTP: https://docs.turso.tech/sdk/http/reference. Checkpointy, limiter i blokady są wspólne dla wszystkich instancji Vercel, a nie zapisywane na dysku funkcji. Testowy SQLite może być włączony przez CRM_TEST_DB_PATH tylko poza Vercel.
+Archiwalne pliki Prisma i docker-compose nie obsługują tej aplikacji. Magazyn produkcyjny korzysta z PostgreSQL w Supabase przez Transaction pooler. Checkpointy, limiter i blokady są wspólne dla wszystkich instancji Vercel. Testowy PostgreSQL PGlite jest włączany przez CRM_TEST_DB_PATH wyłącznie poza Vercel.
 
 ## Automatyczna analiza firm
 Każdy import CEIDG i KRS zapisuje analizę z danych rejestrowych. Tabela pokazuje priorytet sprawdzenia, możliwe kanały (WWW, Allegro, Amazon / eBay) i liczbę uwag do danych. Szczegóły zawierają uzasadnienia, ograniczenia, datę źródła oraz listę rzeczy do potwierdzenia przed ofertą. Ponowny import przelicza analizę i zachowuje ręczne dane CRM; stare wpisy otrzymują bieżącą analizę przy odczycie.
@@ -57,9 +57,9 @@ Imię w nagłówku pochodzi z zalogowanego konta. Przejmij kontakt zapisuje osob
 
 Oznaczenia można dodawać, edytować i usuwać przy firmie, a następnie filtrować po dokładnym oznaczeniu. Zmiana nazwy dotyczy tej firmy, nie zmienia oznaczeń w całej bazie. Oznaczenia i przypisania zachowują się przy ponownym imporcie. Filtry łączą się z PKD, statusem, wyszukiwaniem i kontaktami oraz obejmują całą bazę przed paginacją.
 
-Każdy zapis CRM wymaga crmRevision z odczytanej firmy. Porównanie i zapis odbywają się w jednej transakcji; nieaktualna wersja otrzymuje HTTP 409 i nie nadpisuje danych. Po konflikcie użytkownik zachowuje szkic i może wczytać aktualne dane, świadomie zastępując szkic. Starsze otwarte wersje interfejsu muszą odświeżyć stronę. Zmiana statusu na Kontakt wykonany zapisuje datę oznaczenia kontaktu; aplikacja nie wykrywa faktycznego połączenia. Lista odświeża się co 10 sekund.
+Każdy zapis CRM wymaga crmRevision z odczytanej firmy. Porównanie i zapis odbywają się w jednej transakcji; nieaktualna wersja otrzymuje HTTP 409 i nie nadpisuje danych. Po konflikcie użytkownik zachowuje szkic i może wczytać aktualne dane, świadomie zastępując szkic. Starsze otwarte wersje interfejsu muszą odświeżyć stronę. Zmiana statusu na Kontakt wykonany zapisuje datę oznaczenia kontaktu; aplikacja nie wykrywa faktycznego połączenia. Lista odświeża się co minutę w widocznej karcie; przy błędzie czeka na ręczne ponowienie.
 
-Analizuj szerzej — OpenAI uruchamia Responses API (gpt-5.4-mini) z maksymalnie 12 użyciami narzędzia web_search łącznie, kontekstem medium i maksymalnie 8000 tokenów wyjścia. Otwarcia stron również mieszczą się w tym limicie; rozliczenie pokazuje liczbę faktycznych wyszukiwań. Jedno żądanie ma limit 240 sekund i nie jest automatycznie ponawiane. Szerszy zakres kosztuje więcej niż poprzedni wariant 3 użyć; faktyczny koszt zależy od tokenów i wyszukiwań. Zadanie działa jako Vercel Workflow i zapisuje raport w Turso; zamknięcie karty nie zatrzymuje analizy.
+Analizuj szerzej — OpenAI uruchamia Responses API (gpt-5.4-mini) z maksymalnie 12 użyciami narzędzia web_search łącznie, kontekstem medium i maksymalnie 8000 tokenów wyjścia. Otwarcia stron również mieszczą się w tym limicie; rozliczenie pokazuje liczbę faktycznych wyszukiwań. Jedno żądanie ma limit 240 sekund i nie jest automatycznie ponawiane. Szerszy zakres kosztuje więcej niż poprzedni wariant 3 użyć; faktyczny koszt zależy od tokenów i wyszukiwań. Zadanie działa jako Vercel Workflow i zapisuje raport w Supabase; zamknięcie karty nie zatrzymuje analizy.
 
 Raport rozszerzony (wersja 2) zawiera obecność na Facebooku, Instagramie, LinkedIn, Allegro Polska, Amazon, eBay, zagranicznych rynkach Allegro i pozostałej dopasowanej platformie. Każdy kanał ma status: potwierdzono, nie znaleziono, niedostępne albo nie sprawdzono. Potwierdzenie wymaga użytych źródeł profilu i dowodu dopasowania firmy; URL musi należeć do wskazanej platformy. Nie znaleziono wymaga zwróconego przez API zapytania dotyczącego kanału; brak metadanych oznacza nie sprawdzono. Brak wyniku nie dowodzi braku konta.
 
@@ -86,3 +86,6 @@ Na Vercel wybierz CRM_AI_PROVIDER=gemini, dodaj GEMINI_API_KEY z projektu Google
 Model gemini-3.8-flash korzysta z URL Context tylko dla WWW podanego w rejestrze. Nie korzysta z Google Search. Gdy WWW brakuje lub pobranie nie powiedzie się, raport zawiera wyłącznie hipotezy z rejestru, bez fikcyjnego audytu strony. Potencjał marketplace wymaga danych o asortymencie; brak źródeł oznacza brak danych. Wykorzystane źródła pochodzą wyłącznie z udanego pobrania dokładnie podanego URL. Limity konta Google sprawdzaj w AI Studio; 50 w CRM jest górnym limitem zespołu, a nie gwarantowaną liczbą analiz Google. Limit dzienny, odstęp minimum 12 sekund, zapis raportu i brak automatycznych ponowień ograniczają zużycie.
 
 Dokumentacja: https://ai.google.dev/gemini-api/docs/pricing, https://ai.google.dev/gemini-api/docs/generate-content/url-context, https://ai.google.dev/gemini-api/docs/generate-content/structured-output, https://ai.google.dev/api/generate-content, https://ai.google.dev/gemini-api/docs/billing. Wysyłamy tylko publiczny profil firmy opisany wyżej, bez notatek, kontaktów czy oznaczeń. store:false ogranicza logowanie żądania; obowiązują warunki Google.
+
+
+Dane aplikacji są w prywatnym schemacie `crm`; nie udostępniaj go przez Data API. Migracja rozpoczyna nową bazę, bez kopiowania Turso. Transakcje zapisu używają wspólnej blokady, żeby równoległe przejęcia firm i limity pozostawały atomowe. Testy uruchamiają ten sam SQL w PGlite (PostgreSQL). Listy odświeżają się co minutę tylko w widocznej karcie; zakończone i błędne zadania nie generują odczytów w pętli. Import działa niezależnie w Vercel Workflow.

@@ -58,5 +58,5 @@ test('Contact filters combine with paging; focused import preserves cursor, excl
     const newest = await companyPage('started-', 'Wszystkie', 'Wszystkie', 0, 'all', 'all', '', '', 'startedDesc');
     assert.equal(oldest.companies[0].registryId, 'started-old');
     assert.equal(newest.companies[0].registryId, 'started-new');
-  } finally { globalThis.fetch = originalFetch; closeTestDatabase(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { globalThis.fetch = originalFetch; await closeTestDatabase(); rmSync(directory, { recursive: true, force: true }); }
 });

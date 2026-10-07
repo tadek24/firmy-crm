@@ -87,5 +87,5 @@ test('Cloud import checkpoints, retries, leases, pause during API response, resu
     await clearRate();
     globalThis.fetch = async () => Response.json({ message: 'Rozmiar strony powinien być z zakresu 1-25 fixture-token' }, { status:400 });
     await assert.rejects(ceidgActivePage(0), error => error instanceof Error && error.message.includes('1-25') && !error.message.includes('fixture-token'));
-  } finally { globalThis.fetch = originalFetch; closeTestDatabase(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { globalThis.fetch = originalFetch; await closeTestDatabase(); rmSync(directory, { recursive: true, force: true }); }
 });

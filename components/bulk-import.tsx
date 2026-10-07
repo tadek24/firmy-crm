@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from 'react';
 import type { BulkJob } from '@/lib/bulk';
+import { startVisiblePolling } from '@/lib/visible-polling';
 const labels = { running: 'Zbieranie w tle', paused: 'Wstrzymany', failed: 'Wymaga sprawdzenia', complete: 'Zakończony' };
 const format = (n: number) => n.toLocaleString('pl-PL');
 export function BulkImport() {
@@ -10,6 +11,7 @@ export function BulkImport() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const thisYear = new Date().getUTCFullYear();
   const [fromYear, setFromYear] = useState(2020);
   const [toYear, setToYear] = useState(thisYear);
@@ -20,16 +22,17 @@ export function BulkImport() {
         const response = await fetch('/api/import/bulk'); const data = await response.json();
         if (!response.ok) throw new Error(data.error);
         if (!cancelled) { setJob(data.job); setConfigured(data.ceidgConfigured); setWorkerAlive(data.workerAlive); setError(''); setLoaded(true); }
-      } catch (error) { if (!cancelled) { setError((error as Error).message || 'Nie można odczytać postępu importu.'); setLoaded(true); } }
+        return data.job?.state === 'running' ? 15000 : null;
+      } catch (error) { if (!cancelled) { setError((error as Error).message || 'Nie można odczytać postępu importu.'); setLoaded(true); } return null; }
     }
-    void refresh(); const timer = setInterval(refresh, 5000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, []);
+    const stop = startVisiblePolling(refresh);
+    return () => { cancelled = true; stop(); };
+  }, [refreshVersion]);
   async function control(action: 'yearly' | 'pause' | 'resume') {
     setBusy(true); setError('');
     try {
       const response = await fetch('/api/import/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, target: 1000, fromYear, toYear }) });
-      const data = await response.json(); if (!response.ok) throw new Error(data.error); setJob(data.job);
+      const data = await response.json(); if (!response.ok) throw new Error(data.error); setJob(data.job); setRefreshVersion(value => value + 1);
     } catch (error) { setError((error as Error).message); } finally { setBusy(false); }
   }
   const campaign = job?.yearly;
@@ -48,7 +51,7 @@ export function BulkImport() {
       {job.message && <p className="token-notice">{job.message}{job.state === 'running' && job.nextRunAt > 0 && ` Następna próba: ${new Date(job.nextRunAt).toLocaleString('pl-PL')}.`}</p>}
       {job.state === 'running' && !workerAlive && <p className="small muted">Zadanie jest zaplanowane w chmurze. Kolejna partia zostanie sprawdzona automatycznie.</p>}
     </div>}
-    {error && <p role="alert" className="token-notice">{error}</p>}
+    {error && <div><p role="alert" className="token-notice">{error}</p><button disabled={busy} onClick={() => setRefreshVersion(value => value + 1)}>Sprawdź ponownie</button></div>}
     <div className="bulk-actions">
       {job?.state === 'running' ? <button disabled={busy} onClick={() => control('pause')}>Wstrzymaj selekcję</button> : campaign && job?.state !== 'complete' ? <button className="primary" disabled={!configured || busy} onClick={() => control('resume')}>Wznów import roczników</button> : <>
         <label>Od roku <input type="number" aria-label="Import od roku" min={1900} max={thisYear} value={fromYear} disabled={busy} onChange={event => setFromYear(Number(event.target.value))}/></label>

@@ -15,7 +15,7 @@ test('Shared ownership, exact labels, stale claims and edits, import preservatio
   try {
     const original = (await upsertRegistry([fixture],'CEIDG'))[0];
     // First generation rows remain readable and must reject clients without a revision.
-    await query("UPDATE companies SET crm=json_remove(crm,'$.crmRevision','$.assignee') WHERE id=?",[original.id]);
+    await query("UPDATE companies SET crm=(crm::jsonb - 'crmRevision' - 'assignee')::text WHERE id=?",[original.id]);
     const legacy = (await companyPage()).companies[0];
     assert.equal(legacy.crmRevision,'0'); assert.equal(legacy.assignee,'');
     await assert.rejects(updateCrm(original.id,{assignee:'Basia'}),CrmConflictError);
@@ -38,12 +38,12 @@ test('Shared ownership, exact labels, stale claims and edits, import preservatio
     await assert.rejects(updateCrm(original.id,{assignee:123,crmRevision:reassigned.crmRevision}),/osoba/);
     await assert.rejects(updateCrm(original.id,{assignee:'A\nB',crmRevision:reassigned.crmRevision}),/osoba/);
     const batch = await upsertRegistry(Array.from({length:105},(_,i)=>({...fixture,registryId:`team-${i+2}`})),'CEIDG');
-    await query("UPDATE companies SET crm=json_set(crm,'$.assignee','Tadeusz','$.tags',json('[\"Allegro\"]')) WHERE id!=?",[original.id]);
+    await query("UPDATE companies SET crm=(crm::jsonb || jsonb_build_object('assignee','Tadeusz','tags',jsonb_build_array('Allegro')))::text WHERE id!=?",[original.id]);
     assert.equal(batch.length,105);
     assert.equal((await companyPage('','Wszystkie','Wszystkie',0,'phone','all','person:Tadeusz','Allegro')).companies.length,100);
     assert.equal((await companyPage('','Wszystkie','Wszystkie',1,'phone','all','person:Tadeusz','Allegro')).companies.length,5);
     assert.equal((await companyPage('','Kontakt wykonany','Wszystkie',0,'phone','all','person:Tadeusz','Allegro')).total,0);
     const empty = await updateCrm(original.id,{assignee:'',tags:[],crmRevision:reassigned.crmRevision});
     assert.equal((await page('unassigned','')).total,1); assert.equal(canCall(empty,'Basia'),false);
-  } finally { closeTestDatabase(); delete process.env.CRM_TEST_DB_PATH; rmSync(directory,{recursive:true,force:true}); }
+  } finally { await closeTestDatabase(); delete process.env.CRM_TEST_DB_PATH; rmSync(directory,{recursive:true,force:true}); }
 });

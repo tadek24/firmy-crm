@@ -14,12 +14,12 @@ async function initialize() {
   await batch([
     { sql: 'CREATE TABLE IF NOT EXISTS crm_people (id TEXT PRIMARY KEY, name TEXT NOT NULL, active INTEGER NOT NULL)' },
     { sql: 'CREATE TABLE IF NOT EXISTS crm_users (id TEXT PRIMARY KEY, login TEXT NOT NULL UNIQUE, name TEXT NOT NULL, role TEXT NOT NULL, active INTEGER NOT NULL, personId TEXT NOT NULL, passwordHash TEXT NOT NULL, revision TEXT NOT NULL)' },
-    { sql: "INSERT OR IGNORE INTO crm_users VALUES ('owner','admin','Administrator','admin',1,'','','1')" },
+    { sql: "INSERT INTO crm_users VALUES ('owner','admin','Administrator','admin',1,'','','1') ON CONFLICT DO NOTHING" },
   ]);
   // Preserve only people actually assigned to firms. No example names are seeded.
   await transaction(async () => {
     const existing = (await query('SELECT name FROM crm_people')).rows.map(row => String(row.name).toLocaleLowerCase('pl'));
-    const assigned = (await query("SELECT DISTINCT json_extract(crm,'$.assignee') AS name FROM companies WHERE trim(coalesce(json_extract(crm,'$.assignee'),''))!=''")).rows;
+    const assigned = (await query("SELECT DISTINCT (crm::jsonb #>> '{assignee}') AS name FROM companies WHERE trim(coalesce((crm::jsonb #>> '{assignee}'),''))!=''")).rows;
     for (const row of assigned) {
       const name = String(row.name).trim(), key = name.toLocaleLowerCase('pl');
       if (!existing.includes(key)) { await query('INSERT INTO crm_people VALUES (?,?,1)', [randomUUID(), name]); existing.push(key); }
@@ -79,7 +79,7 @@ export async function saveTeamPerson(actor: CurrentUser, input: Record<string, u
     await query('INSERT INTO crm_people VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,active=excluded.active', [id, name, Number(input.active)]);
     if (old && old.name !== name) {
       const revision = randomUUID(), now = new Date().toISOString();
-      await query("UPDATE companies SET crm=json_set(crm,'$.assignee',?,'$.crmRevision',?,'$.crmUpdatedAt',?,'$.searchTags',lower(coalesce(json_extract(crm,'$.tags'),'') || ' ' || ?)) WHERE json_extract(crm,'$.assignee')=?", [name, revision, now, name, old.name]);
+      await query("UPDATE companies SET crm=(crm::jsonb || jsonb_build_object('assignee',?::text,'crmRevision',?::text,'crmUpdatedAt',?::text,'searchTags',lower(coalesce(crm::jsonb->>'tags','') || ' ' || ?::text)))::text WHERE (crm::jsonb #>> '{assignee}')=?", [name, revision, now, name, old.name]);
     }
     return { id, name, active: input.active };
   });

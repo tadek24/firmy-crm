@@ -55,7 +55,7 @@ test('AI budget reservation, repeated clicks, saved reports, privacy, failures a
     await assert.rejects(requestAnalysis(company.id,true),/limit 2/);
     delete process.env.OPENAI_API_KEY; await assert.rejects(requestAnalysis(company.id),/OPENAI_API_KEY/);
   } finally {
-    globalThis.fetch=originalFetch; closeTestDatabase();
+    globalThis.fetch=originalFetch; await closeTestDatabase();
     for(const key of ['CRM_TEST_DB_PATH','CRM_AI_ENABLED','OPENAI_API_KEY','CRM_AI_DAILY_LIMIT'])delete process.env[key];
     rmSync(directory,{recursive:true,force:true});
   }

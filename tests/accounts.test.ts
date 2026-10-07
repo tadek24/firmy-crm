@@ -70,5 +70,5 @@ test('Individual accounts, administrator authorization, immediate session revoca
     await saveTeamUser(owner, { ...reset, role: 'admin' });
     assert.equal(await sessionUser(token3), null);
     assert.equal(await sessionUser(`${token3}x`), null);
-  } finally { closeTestDatabase(); delete process.env.CRM_TEST_DB_PATH; rmSync(directory, { recursive: true, force: true }); }
+  } finally { await closeTestDatabase(); delete process.env.CRM_TEST_DB_PATH; rmSync(directory, { recursive: true, force: true }); }
 });
