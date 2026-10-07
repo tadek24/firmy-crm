@@ -23,7 +23,7 @@ let testDatabase: Promise<PGlite> | undefined;
 function client() {
   const url = process.env.SUPABASE_DATABASE_URL?.trim();
   if (!url) throw new DatabaseError('Podłącz bazę Supabase: ustaw SUPABASE_DATABASE_URL w Vercel i wykonaj ponowne wdrożenie.');
-  if (!pool) pool = postgres(url, {ssl:'require',prepare:false,max:2,idle_timeout:20,connect_timeout:10,types:{bigint:{to:20,from:[20],serialize:String,parse:Number}}});
+  if (!pool) pool = postgres(url, {password:process.env.SUPABASE_DATABASE_PASSWORD,ssl:'require',prepare:false,max:2,idle_timeout:20,connect_timeout:10,types:{bigint:{to:20,from:[20],serialize:String,parse:Number}}});
   return pool;
 }
 async function local() {
