@@ -45,7 +45,7 @@ test('Gemini requires free-tier confirmation, throttles shared requests and neve
     assert.equal(calls,2); assert.equal((await aiStatus(company.id))?.state,'failed'); assert.match((await aiStatus(company.id))?.error || '',/Nie przełączamy/);
     assert.ok(!(await aiStatus(company.id))?.error?.includes('never expose'));
   } finally {
-    globalThis.fetch=originalFetch; closeTestDatabase();
+    globalThis.fetch=originalFetch; await closeTestDatabase();
     for(const key of ['CRM_TEST_DB_PATH','CRM_AI_ENABLED','CRM_AI_PROVIDER','GEMINI_API_KEY','OPENAI_API_KEY','CRM_GEMINI_FREE_TIER_CONFIRMED']) delete process.env[key];
     rmSync(directory,{recursive:true,force:true});
   }

@@ -1,0 +1,32 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { startVisiblePolling } from '../lib/visible-polling';
+
+test('Polling pauses hidden tabs, prevents overlapping reads, and stops on terminal results or errors', async t => {
+  t.mock.timers.enable({apis:['setTimeout','Date']});
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const doc = Object.assign(new EventTarget(), {hidden:false});
+  Object.defineProperty(globalThis, 'document', {value:doc,configurable:true});
+  t.after(() => { if (previous) Object.defineProperty(globalThis,'document',previous); else Reflect.deleteProperty(globalThis,'document'); });
+  const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
+  let calls = 0, resolve: (delay: number | null) => void = () => {};
+  const stop = startVisiblePolling(async () => { calls++; return new Promise<number | null>(done => {resolve=done;}); });
+  t.mock.timers.tick(0); await flush(); assert.equal(calls,1);
+  t.mock.timers.tick(60000); doc.dispatchEvent(new Event('visibilitychange')); await flush();
+  assert.equal(calls,1,'Slow responses cannot overlap with later polls');
+  resolve(1000); await flush();
+  doc.hidden=true; doc.dispatchEvent(new Event('visibilitychange'));
+  t.mock.timers.tick(60000); await flush(); assert.equal(calls,1);
+  doc.hidden=false; doc.dispatchEvent(new Event('visibilitychange'));
+  t.mock.timers.tick(0); await flush(); assert.equal(calls,2);
+  resolve(null); await flush(); t.mock.timers.tick(60000);
+  doc.dispatchEvent(new Event('visibilitychange')); await flush(); assert.equal(calls,2,'Completed work stays stopped');
+  stop();
+  let failures=0;
+  const stopErrors = startVisiblePolling(async () => { failures++; throw new Error('quota'); });
+  t.mock.timers.tick(0); await flush(); t.mock.timers.tick(60000);
+  doc.dispatchEvent(new Event('visibilitychange')); await flush(); assert.equal(failures,1,'A failed request requires an explicit retry');
+  stopErrors();
+  const stopBeforeRead = startVisiblePolling(async () => { calls++; return 1000; },250);
+  stopBeforeRead(); t.mock.timers.tick(1000); await flush(); assert.equal(calls,2,'Unmounting cancels scheduled work');
+});
